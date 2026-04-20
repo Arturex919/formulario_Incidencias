@@ -1,76 +1,58 @@
 # 📋 Formulario de Incidencias 2026 - Gestión Inteligente
 
-Este proyecto es una solución híbrida diseñada para automatizar el procesamiento de reportes de incidencias desde archivos Excel, visualizarlos en una interfaz moderna y guardarlos de forma organizada en Google Sheets.
+Este proyecto es una solución híbrida profesional diseñada para automatizar la gestión de incidencias desde archivos Excel hacia Google Sheets utilizando la API de Google Cloud.
 
 ## 🚀 Arquitectura del Sistema
 
-El sistema se divide en tres componentes principales:
+El sistema utiliza una arquitectura de tres capas:
 
-1.  **Procesador de Datos (Python + Pandas)**: Lee archivos Excel y los convierte a un formato JSON estandarizado para la plataforma web.
-2.  **Interfaz de Usuario (React + Vite)**: Una aplicación web premium con estética *Glassmorphism* que permite revisar, completar y enviar las incidencias.
-3.  **Backend de Google (Apps Script)**: Recibe los datos de la web y los escribe en tiempo real en la hoja de cálculo de Google.
+1.  **Frontend (React + Vite)**: Interfaz de usuario premium para la revisión y envío de incidencias.
+2.  **API Backend (Python + Flask)**: Servidor local que actúa como puente de datos.
+3.  **Base de Datos (Google Sheets)**: Almacenamiento final mediante la API oficial de Google (Service Account).
 
 ---
 
 ## 🛠️ Instalación y Configuración
 
 ### 1. Requisitos Previos
-- **Node.js** (v18 o superior)
-- **Python 3.x** con la librería `pandas` y `openpyxl`.
+- **Node.js** (v18+)
+- **Python 3.x**
   ```bash
-  pip install pandas openpyxl
+  pip install pandas openpyxl gspread oauth2client flask flask-cors
   ```
 
-### 2. Configuración del Proyecto
-Clona o descarga este repositorio y ejecuta:
-```bash
-npm install
-```
+### 2. Configuración de Google Cloud
+El sistema ya cuenta con el archivo de credenciales `rental-holidays-492710-e52e75d23cfd.json`.
+
+> [!IMPORTANT]
+> **Paso Crítico**: Debes compartir tu Google Sheet con este email (permisos de editor):
+> `formulario-incidencia@rental-holidays-492710.iam.gserviceaccount.com`
 
 ---
 
 ## 📖 Guía de Uso
 
-### Paso 1: Procesar el Excel con Pandas
-Coloca tu archivo de incidencias (ej: `Incidencias.xlsx`) en la carpeta raíz y ejecuta el script de Python:
-```bash
-python processor.py Incidencias.xlsx
-```
-Esto generará el archivo `public/data.json` que alimenta a la web.
-
-### Paso 2: Ejecutar la Web
-Inicia el servidor de desarrollo para ver la interfaz:
-```bash
-npm run dev
-```
-Accede a `http://localhost:5173/`. Pulsa el botón **"Sincronizar con Excel"** para cargar los datos procesados.
-
-### Paso 3: Conexión con Google Sheets (Apps Script)
-1. Abre tu hoja de Google Sheets.
-2. Ve a `Extensiones > Apps Script`.
-3. Pega el código que se encuentra en `google-apps-script/Code.gs`.
-4. Implementa como **Aplicación Web** con acceso para **Cualquier persona**.
-5. Copia la URL generada y actualiza la lógica de envío en `App.jsx`.
+1.  **Carga del Excel**: Asegúrate de tener tu archivo Excel (ej: `Incidencias.xlsx`) en la carpeta raíz del proyecto.
+2.  **Inicia el Servidor API**:
+    ```bash
+    python api.py
+    ```
+    *(Mantén esta ventana abierta)*.
+3.  **Inicia la Web**:
+    ```bash
+    npm run dev
+    ```
+4.  **Gestión**: Entra en `http://localhost:5173`, pulsa **Sincronizar**, selecciona una incidencia, complétala y pulsa **Guardar en Sheet**. Los datos aparecerán instantáneamente en tu Google Sheet.
 
 ---
 
 ## 📁 Estructura de Archivos
 
-- `/src/App.jsx`: Componente principal de la interfaz y lógica de envío.
-- `/src/index.css`: Sistema de diseño basado en variables y estética premium.
-- `processor.py`: Script de procesamiento de datos con Pandas.
-- `/google-apps-script/Code.gs`: Código para el backend de Google Sheets.
-- `public/data.json`: Datos listos para ser consumidos por la web.
+- `api.py`: El corazón del sistema (Servidor Flask + Conexión Google Sheets).
+- `src/App.jsx`: Interfaz de usuario interactiva.
+- `rental-holidays-492710-e52e75d23cfd.json`: Clave privada de acceso a Google Cloud.
+- `README.md`: Esta guía de uso.
 
 ---
 
-## ✨ Tecnologías Utilizadas
-
-- **Frontend**: React, Vite, Framer Motion (animaciones), Lucide React (iconos).
-- **Data Engineering**: Python, Pandas.
-- **Backend**: Google Apps Script (GAS).
-- **Estilos**: Vanilla CSS con enfoque en modernismo y glassmorphism.
-
----
-
-Desarrollado por **Antigravity AI** para una gestión de incidencias eficiente y profesional. 🚀
+Desarrollado con precisión por **Antigravity AI**. 🚀

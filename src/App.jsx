@@ -1,190 +1,372 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, Upload, Send, CheckCircle, AlertCircle, ChevronRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import {
+  FileText, Send, CheckCircle, AlertCircle, ChevronDown,
+  User, Home, Calendar, ClipboardList, Wrench, DollarSign,
+  MessageSquare, PlusCircle, Loader2, Moon, Sun
+} from 'lucide-react';
 
-function App() {
-  const [incidencias, setIncidencias] = useState([]);
-  const [selected, setSelected] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState({ type: '', msg: '' });
+// ─── Opciones del desplegable (igual que en el Excel) ──────────────────────────
+const CLASIFICACIONES = [
+  "AVERÍA",
+  "MANTENIMIENTO",
+  "LIMPIEZA",
+  "INSTALACIONES",
+  "ELECTRODOMÉSTICOS",
+  "FONTANERÍA",
+  "ELECTRICIDAD",
+  "CARPINTERÍA",
+  "PINTURA",
+  "CLIMATIZACIÓN",
+  "JARDÍN / EXTERIOR",
+  "SEGURIDAD",
+  "SUMINISTROS",
+  "CHECK-IN / CHECK-OUT",
+  "INCIDENCIA CON HUÉSPED",
+  "Otro",
+];
 
-  // Simulación de carga desde data.json (que generará Python)
-  const cargarDatos = async () => {
+const ESTADOS_INICIALES = ["PENDIENTE", "EN PROCESO", "RESUELTO"];
+
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/TU_URL_AQUI/exec";
+
+// ─── Estado inicial del formulario ────────────────────────────────────────────
+const FORM_INICIAL = {
+  responsable: "",
+  fecha: new Date().toISOString().split("T")[0],
+  ref: "",
+  propiedad: "",
+  clasificacion: "",
+  clasificacionOtro: "",
+  descripcion: "",
+  operario: "",
+  costoManoObra: "",
+  accionTomada: "",
+  estado: "PENDIENTE",
+};
+
+// ─── Componente principal ──────────────────────────────────────────────────────
+export default function App() {
+  const [form, setForm]             = useState(FORM_INICIAL);
+  const [loading, setLoading]       = useState(false);
+  const [status, setStatus]         = useState({ type: "", msg: "" });
+  const [showSuccess, setShowSuccess] = useState(false);
+
+  // ── Tema ──────────────────────────────────────────────────────────────────
+  const [darkMode, setDarkMode] = useState(() => {
+    const saved = localStorage.getItem("theme");
+    if (saved) return saved === "dark";
+    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", darkMode ? "dark" : "light");
+    localStorage.setItem("theme", darkMode ? "dark" : "light");
+  }, [darkMode]);
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setForm((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const clasificacionFinal =
+    form.clasificacion === "Otro" ? form.clasificacionOtro : form.clasificacion;
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    if (!form.responsable || !form.propiedad || !form.clasificacion || !form.descripcion) {
+      setStatus({ type: "error", msg: "Por favor, rellena los campos obligatorios (*)." });
+      return;
+    }
+    if (form.clasificacion === "Otro" && !form.clasificacionOtro.trim()) {
+      setStatus({ type: "error", msg: 'Especifica el tipo de incidencia en el campo "Otro".' });
+      return;
+    }
+
     setLoading(true);
+    setStatus({ type: "info", msg: "Enviando a Google Sheets..." });
+
+    const payload = {
+      "RESPONSABLE DEL REPORTE":       form.responsable,
+      "FECHA REPORTE INCIDENCIA":       form.fecha,
+      "ref":                            form.ref,
+      "PROPIEDAD":                      form.propiedad,
+      "CLASIFICACION DE LA INCIDENCIA": clasificacionFinal,
+      "DESCRIPCION DE LA INCIDENCIA":   form.descripcion,
+      "OPERARIO":                       form.operario,
+      "costo mano obra":                form.costoManoObra,
+      "ACCION TOMADA":                  form.accionTomada,
+      "ESTADO":                         form.estado,
+    };
+
     try {
-      // Intentamos cargar el JSON generado por processor.py
-      // Nota: En desarrollo con Vite, el JSON debe estar en la carpeta public o servirse localmente
-      const response = await fetch('/data.json'); 
-      if (!response.ok) throw new Error('No se encontró data.json');
-      const data = await response.json();
-      setIncidencias(data);
-      setStatus({ type: 'success', msg: `¡${data.length} incidencias cargadas!` });
+      await fetch(GOOGLE_SCRIPT_URL, {
+        method: "POST",
+        mode: "no-cors",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      setStatus({ type: "success", msg: "¡Incidencia enviada correctamente a Google Sheets!" });
+      setShowSuccess(true);
+      setForm(FORM_INICIAL);
+      setTimeout(() => setShowSuccess(false), 4000);
     } catch (error) {
-      console.error(error);
-      setStatus({ type: 'error', msg: 'Error: Genera el archivo data.json con processor.py primero.' });
+      setStatus({ type: "error", msg: "Error al enviar: " + error.message });
     } finally {
       setLoading(false);
     }
   };
 
-  const handleEnviar = (e) => {
-    e.preventDefault();
-    setStatus({ type: 'info', msg: 'Enviando a Google Sheets...' });
-    setTimeout(() => {
-      setStatus({ type: 'success', msg: '¡Guardado con éxito en Incidencias 2026!' });
-      setSelected(null);
-    }, 2000);
-  };
-
   return (
-    <div className="container p-8 max-w-6xl mx-auto">
-      <header className="mb-12 text-center animate-fade-in">
-        <h1 className="flex items-center justify-center gap-3">
-          <FileText size={40} className="text-indigo-400" />
-          Gestión de Incidencias 2026
-        </h1>
-        <p className="text-slate-400 text-lg">Sistema inteligente de reporte y seguimiento</p>
-      </header>
+    <div className="page-wrap">
 
-      <main className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        <section className="lg:col-span-4 space-y-4">
-          <div className="glass-card">
-            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-              <Upload size={20} className="text-indigo-400" />
-              Cargar Reportes
-            </h2>
-            <button 
-              onClick={cargarDatos}
-              className="btn w-full justify-center"
-              disabled={loading}
-            >
-              {loading ? 'Procesando...' : 'Sincronizar con Excel'}
-            </button>
-            <p className="mt-3 text-xs text-slate-500 text-center">
-              Se utilizará Pandas para procesar el archivo Excel seleccionado.
-            </p>
-          </div>
-
-          <div className="glass-card">
-            <h3 className="font-semibold mb-3 text-slate-300">Estado del Sistema</h3>
-            {status.msg && (
-              <div className={`p-3 rounded-lg text-sm flex items-center gap-2 ${
-                status.type === 'success' ? 'bg-emerald-500/20 text-emerald-300' : 
-                status.type === 'error' ? 'bg-rose-500/20 text-rose-300' : 'bg-blue-500/20 text-blue-300'
-              }`}>
-                {status.type === 'success' ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
-                {status.msg}
-              </div>
-            )}
-          </div>
-        </section>
-
-        <section className="lg:col-span-8">
-          <AnimatePresence mode="wait">
-            {incidencias.length > 0 ? (
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="grid gap-4"
-              >
-                {incidencias.map((item, idx) => (
-                  <motion.div
-                    key={idx}
-                    whileHover={{ scale: 1.02 }}
-                    className={`glass-card cursor-pointer transition-all ${selected === item ? 'border-indigo-500 ring-2 ring-indigo-500/20' : ''}`}
-                    onClick={() => setSelected(item)}
-                  >
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <span className="text-xs font-bold uppercase tracking-wider text-indigo-400 mb-1 block">
-                          Ref: {item.ref} | {item["CLASIFICACION DE LA INCIDENCIA"]}
-                        </span>
-                        <h3 className="text-lg font-bold">{item.PROPIEDAD}</h3>
-                        <p className="text-slate-400 text-sm mt-1 line-clamp-1">{item["DESCRIPCION DE LA INCIDENCIA"]}</p>
-                      </div>
-                      <ChevronRight className="text-slate-600" />
-                    </div>
-                  </motion.div>
-                ))}
-              </motion.div>
-            ) : (
-              <div className="glass-card text-center py-20">
-                <Upload size={48} className="mx-auto text-slate-700 mb-4" />
-                <p className="text-slate-500">No hay datos cargados. Pulsa "Sincronizar" para empezar.</p>
-              </div>
-            )}
-          </AnimatePresence>
-        </section>
-      </main>
-
-      {/* Modal de Formulario */}
+      {/* ── TOAST ──────────────────────────────────── */}
       <AnimatePresence>
-        {selected && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm"
+        {showSuccess && (
+          <motion.div
+            className="toast toast-success"
+            initial={{ opacity: 0, y: -30 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -30 }}
           >
-            <motion.div 
-              initial={{ scale: 0.9, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              className="glass-card max-w-2xl w-full max-h-[90vh] overflow-y-auto"
-            >
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-2xl font-bold">Completar Incidencia</h2>
-                <button onClick={() => setSelected(null)} className="text-slate-400 hover:text-white">✕</button>
-              </div>
-
-              <form onSubmit={handleEnviar} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Propiedad</label>
-                  <input type="text" readOnly value={selected.PROPIEDAD} className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-slate-300" />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Responsable</label>
-                  <input type="text" readOnly value={selected["RESPONSABLE DEL REPORTE"]} className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-slate-300" />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Fecha</label>
-                  <input type="date" value={selected["FECHA REPORTE INCIDENCIA"]} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 focus:ring-2 focus:ring-indigo-500 outline-none" />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Descripción</label>
-                  <textarea rows="3" defaultValue={selected["DESCRIPCION DE LA INCIDENCIA"]} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 focus:ring-2 focus:ring-indigo-500 outline-none"></textarea>
-                </div>
-                
-                <div className="md:col-span-2 mt-4 pt-4 border-t border-slate-800">
-                  <h3 className="text-sm font-bold text-indigo-400 mb-3">Datos de Resolución</h3>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Operario</label>
-                  <input type="text" placeholder="Nombre operario..." className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 focus:ring-2 focus:ring-indigo-500 outline-none" />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Costo Mano Obra</label>
-                  <input type="number" placeholder="0.00" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 focus:ring-2 focus:ring-indigo-500 outline-none" />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Acción Tomada</label>
-                  <textarea rows="2" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 focus:ring-2 focus:ring-indigo-500 outline-none"></textarea>
-                </div>
-
-                <div className="md:col-span-2 flex justify-end gap-3 mt-6">
-                  <button type="button" onClick={() => setSelected(null)} className="btn btn-secondary">Cancelar</button>
-                  <button type="submit" className="btn">
-                    <Send size={18} />
-                    Guardar en Sheet
-                  </button>
-                </div>
-              </form>
-            </motion.div>
+            <CheckCircle size={20} />
+            ¡Incidencia registrada en la hoja "Incidencia 2026"!
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* ── CABECERA ───────────────────────────────── */}
+      <header className="app-header animate-fade-in">
+        <div className="header-left">
+          <div className="header-icon-wrap">
+            <FileText size={30} />
+          </div>
+          <div>
+            <h1>Incidencias 2026</h1>
+            <p className="subtitle">Sistema de reporte y seguimiento de incidencias</p>
+          </div>
+        </div>
+
+        {/* Botón toggle tema */}
+        <button
+          className="theme-toggle"
+          onClick={() => setDarkMode((d) => !d)}
+          title={darkMode ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
+          aria-label="Cambiar tema"
+        >
+          <AnimatePresence mode="wait" initial={false}>
+            {darkMode ? (
+              <motion.span
+                key="sun"
+                initial={{ rotate: -90, opacity: 0 }}
+                animate={{ rotate: 0,   opacity: 1 }}
+                exit={{   rotate:  90, opacity: 0 }}
+                transition={{ duration: 0.25 }}
+                className="theme-icon"
+              >
+                <Sun size={20} />
+              </motion.span>
+            ) : (
+              <motion.span
+                key="moon"
+                initial={{ rotate: 90,  opacity: 0 }}
+                animate={{ rotate: 0,   opacity: 1 }}
+                exit={{   rotate: -90,  opacity: 0 }}
+                transition={{ duration: 0.25 }}
+                className="theme-icon"
+              >
+                <Moon size={20} />
+              </motion.span>
+            )}
+          </AnimatePresence>
+          <span className="theme-label">{darkMode ? "Modo claro" : "Modo oscuro"}</span>
+        </button>
+      </header>
+
+      {/* ── FORMULARIO ─────────────────────────────── */}
+      <motion.div
+        className="glass-card form-card animate-fade-in"
+        initial={{ opacity: 0, y: 24 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+      >
+        <div className="form-section-title">
+          <PlusCircle size={20} className="icon-accent" />
+          <span>Nueva Incidencia</span>
+        </div>
+
+        <form onSubmit={handleSubmit} noValidate>
+
+          {/* FILA 1 */}
+          <div className="form-grid">
+            <div className="field-group">
+              <label htmlFor="responsable">
+                <User size={14} /> Responsable del reporte <span className="req">*</span>
+              </label>
+              <input id="responsable" name="responsable" type="text"
+                placeholder="Nombre del responsable..."
+                value={form.responsable} onChange={handleChange} required />
+            </div>
+            <div className="field-group">
+              <label htmlFor="fecha">
+                <Calendar size={14} /> Fecha del reporte <span className="req">*</span>
+              </label>
+              <input id="fecha" name="fecha" type="date"
+                value={form.fecha} onChange={handleChange} required />
+            </div>
+          </div>
+
+          {/* FILA 2 */}
+          <div className="form-grid">
+            <div className="field-group">
+              <label htmlFor="ref">
+                <ClipboardList size={14} /> Referencia (Nº)
+              </label>
+              <input id="ref" name="ref" type="text"
+                placeholder="Ej: 001, 002..."
+                value={form.ref} onChange={handleChange} />
+            </div>
+            <div className="field-group">
+              <label htmlFor="propiedad">
+                <Home size={14} /> Propiedad <span className="req">*</span>
+              </label>
+              <input id="propiedad" name="propiedad" type="text"
+                placeholder="Nombre del apartamento o propiedad..."
+                value={form.propiedad} onChange={handleChange} required />
+            </div>
+          </div>
+
+          {/* CLASIFICACIÓN */}
+          <div className="field-group full-width">
+            <label htmlFor="clasificacion">
+              <ClipboardList size={14} /> Clasificación de la incidencia <span className="req">*</span>
+            </label>
+            <div className="select-wrap">
+              <select id="clasificacion" name="clasificacion"
+                value={form.clasificacion} onChange={handleChange} required
+                className={form.clasificacion === "" ? "placeholder" : ""}
+              >
+                <option value="" disabled>— Selecciona una categoría —</option>
+                {CLASIFICACIONES.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+              <ChevronDown size={18} className="select-arrow" />
+            </div>
+
+            <AnimatePresence>
+              {form.clasificacion === "Otro" && (
+                <motion.div className="otro-wrap"
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.25 }}
+                >
+                  <input id="clasificacionOtro" name="clasificacionOtro" type="text"
+                    placeholder="Describe el tipo de incidencia..."
+                    value={form.clasificacionOtro} onChange={handleChange} autoFocus />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* DESCRIPCIÓN */}
+          <div className="field-group full-width">
+            <label htmlFor="descripcion">
+              <MessageSquare size={14} /> Descripción de la incidencia <span className="req">*</span>
+            </label>
+            <textarea id="descripcion" name="descripcion" rows={4}
+              placeholder="Describe detalladamente la incidencia..."
+              value={form.descripcion} onChange={handleChange} required />
+          </div>
+
+          {/* SEPARADOR */}
+          <div className="section-divider">
+            <Wrench size={16} className="icon-accent" />
+            <span>Datos de Resolución <small>(opcional)</small></span>
+          </div>
+
+          {/* FILA 3 */}
+          <div className="form-grid">
+            <div className="field-group">
+              <label htmlFor="operario">
+                <User size={14} /> Operario
+              </label>
+              <input id="operario" name="operario" type="text"
+                placeholder="Nombre del operario..."
+                value={form.operario} onChange={handleChange} />
+            </div>
+            <div className="field-group">
+              <label htmlFor="costoManoObra">
+                <DollarSign size={14} /> Costo mano de obra (€)
+              </label>
+              <input id="costoManoObra" name="costoManoObra" type="number"
+                min="0" step="0.01" placeholder="0.00"
+                value={form.costoManoObra} onChange={handleChange} />
+            </div>
+          </div>
+
+          {/* ACCIÓN TOMADA */}
+          <div className="field-group full-width">
+            <label htmlFor="accionTomada">
+              <ClipboardList size={14} /> Acción tomada
+            </label>
+            <textarea id="accionTomada" name="accionTomada" rows={3}
+              placeholder="Describe la acción tomada para resolver la incidencia..."
+              value={form.accionTomada} onChange={handleChange} />
+          </div>
+
+          {/* ESTADO */}
+          <div className="field-group full-width">
+            <label htmlFor="estado">
+              <CheckCircle size={14} /> Estado
+            </label>
+            <div className="select-wrap">
+              <select id="estado" name="estado"
+                value={form.estado} onChange={handleChange}>
+                {ESTADOS_INICIALES.map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+              <ChevronDown size={18} className="select-arrow" />
+            </div>
+          </div>
+
+          {/* STATUS MSG */}
+          <AnimatePresence>
+            {status.msg && (
+              <motion.div className={`status-msg ${status.type}`}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+              >
+                {status.type === "success" ? <CheckCircle size={16} />
+                  : status.type === "error" ? <AlertCircle size={16} />
+                  : <Loader2 size={16} className="spin" />}
+                {status.msg}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* BOTONES */}
+          <div className="form-actions">
+            <button type="button" className="btn btn-secondary"
+              onClick={() => { setForm(FORM_INICIAL); setStatus({ type: "", msg: "" }); }}>
+              Limpiar
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={loading}>
+              {loading
+                ? <><Loader2 size={18} className="spin" /> Enviando...</>
+                : <><Send size={18} /> Enviar a Google Sheets</>}
+            </button>
+          </div>
+        </form>
+      </motion.div>
+
+      <footer className="app-footer">
+        Incidencias 2026 · Hoja: <strong>Incidencia 2026</strong>
+      </footer>
     </div>
   );
 }
-
-export default App;
