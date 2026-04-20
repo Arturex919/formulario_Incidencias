@@ -146,7 +146,21 @@ body::before {
   height: 56px;
   display: grid;
   place-items: center;
-  flex-shrink: 0;
+  flex-shrink: 0;.btn-backup {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px border rgba(255, 255, 255, 0.1);
+  color: var(--text-main);
+  padding: 0.75rem 1.25rem;
+  border-radius: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-backup:hover {
+  background: rgba(255, 255, 255, 0.1);
+  transform: translateY(-2px);
+}
   box-shadow: 0 8px 24px var(--primary-glow);
   color: #fff;
 }

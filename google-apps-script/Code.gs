@@ -1,97 +1,59 @@
 /**
- * Google Apps Script — Formulario Incidencias 2026
- * Hoja destino: "Incidencia 2026"
- *
- * INSTRUCCIONES:
- * 1. Abre script.google.com y pega este código.
- * 2. Despliega como "Aplicación web" (ejecutar como "Yo", acceso "Cualquiera").
- * 3. Copia la URL de despliegue y pégala en App.jsx → GOOGLE_SCRIPT_URL.
+ * Google Apps Script — Formulario Incidencias 2026 (MAPEO DINÁMICO v3)
  */
 
-const SHEET_NAME = "Incidencia 2026";
+const SHEET_NAME = "INCIDENCIA 2026";
 
-// Orden de columnas que se escribirán en la hoja
-const COLUMN_ORDER = [
-  "RESPONSABLE DEL REPORTE",
-  "FECHA REPORTE INCIDENCIA",
-  "ref",
-  "PROPIEDAD",
-  "CLASIFICACION DE LA INCIDENCIA",
-  "DESCRIPCION DE LA INCIDENCIA",
-  "OPERARIO",
-  "costo mano obra",
-  "ACCION TOMADA",
-  "ESTADO",
-];
+/**
+ * Función de diagnóstico: Abre el link en tu navegador para ver qué columnas detecta el script.
+ */
+function doGet() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEET_NAME);
+    if (!sheet) return ContentService.createTextOutput("⛔ Error: No encuentro la hoja '" + SHEET_NAME + "'");
+    
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    return ContentService.createTextOutput("✅ Conexión Ok. Columnas detectadas: " + headers.join(" | "));
+  } catch (e) {
+    return ContentService.createTextOutput("❌ Error de acceso: " + e.toString());
+  }
+}
 
 function doPost(e) {
   try {
-    const data = JSON.parse(e.postData.contents);
-    const ss   = SpreadsheetApp.getActiveSpreadsheet();
-    let sheet  = ss.getSheetByName(SHEET_NAME);
-
-    // Crear la hoja si no existe y añadir cabeceras
-    if (!sheet) {
-      sheet = ss.insertSheet(SHEET_NAME);
-      sheet.appendRow(COLUMN_ORDER);
-      // Estilo de cabecera
-      const headerRange = sheet.getRange(1, 1, 1, COLUMN_ORDER.length);
-      headerRange.setBackground("#1a237e");
-      headerRange.setFontColor("#ffffff");
-      headerRange.setFontWeight("bold");
-    }
-
-    // Construir la fila en el orden de las columnas
-    const newRow = COLUMN_ORDER.map(col => data[col] !== undefined ? data[col] : "");
-    sheet.appendRow(newRow);
-
-    // Auto-ajustar columnas al insertar
-    sheet.autoResizeColumns(1, COLUMN_ORDER.length);
-
-    return ContentService
-      .createTextOutput(JSON.stringify({
-        status: "success",
-        message: "Incidencia registrada en '" + SHEET_NAME + "' correctamente."
-      }))
-      .setMimeType(ContentService.MimeType.JSON);
-
-  } catch (err) {
-    return ContentService
-      .createTextOutput(JSON.stringify({
-        status: "error",
-        message: err.toString()
-      }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}
-
-// Función para obtener los datos de la hoja (GET)
-function doGet(e) {
-  try {
-    const ss    = SpreadsheetApp.getActiveSpreadsheet();
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
     const sheet = ss.getSheetByName(SHEET_NAME);
-    if (!sheet) return _json({ status: "error", message: "Hoja no encontrada." });
+    if (!sheet) throw new Error("No se encuentra la hoja '" + SHEET_NAME + "'");
 
-    const values  = sheet.getDataRange().getValues();
-    const headers = values[0];
-    const rows    = values.slice(1).map(row => {
-      const obj = {};
-      headers.forEach((h, i) => obj[h] = row[i]);
-      return obj;
+    // 1. Obtener datos (JSON)
+    const data = JSON.parse(e.postData.contents);
+    
+    // 2. Leer cabeceras actuales del Excel (fila 1)
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    
+    // 3. Mapeo inteligente
+    // Creamos una fila vacía con el tamaño de las columnas actuales
+    const newRow = new Array(headers.length).fill("");
+    
+    // Recorremos los datos que nos envía React y buscamos su sitio en el Excel
+    Object.keys(data).forEach(key => {
+      const incomingKey = key.toUpperCase().trim();
+      
+      // Buscamos en qué columna (index) está esa cabecera en el Excel
+      const colIndex = headers.findIndex(h => h.toString().toUpperCase().trim() === incomingKey);
+      
+      if (colIndex !== -1) {
+        newRow[colIndex] = data[key];
+      }
     });
 
-    return _json({ status: "success", data: rows });
-  } catch (err) {
-    return _json({ status: "error", message: err.toString() });
+    // 4. Insertar fila
+    sheet.appendRow(newRow);
+    
+    return ContentService.createTextOutput("SUCCESS").setMimeType(ContentService.MimeType.TEXT);
+
+  } catch (error) {
+    return ContentService.createTextOutput("ERROR: " + error.toString()).setMimeType(ContentService.MimeType.TEXT);
   }
-}
-
-function _json(obj) {
-  return ContentService
-    .createTextOutput(JSON.stringify(obj))
-    .setMimeType(ContentService.MimeType.JSON);
-}
-
-function testScript() {
-  Logger.log("Script listo. Hoja destino: " + SHEET_NAME);
 }

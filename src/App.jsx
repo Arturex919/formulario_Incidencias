@@ -28,7 +28,7 @@ const CLASIFICACIONES = [
 
 const ESTADOS_INICIALES = ["PENDIENTE", "EN PROCESO", "RESUELTO"];
 
-const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/TU_URL_AQUI/exec";
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby-TDE7HoQ4k0kaKOxrUmSTvUCvMWsu0hHaBUjUlwruOszizehtI1YbxFmWghluOrFzhA/exec";
 
 // ─── Estado inicial del formulario ────────────────────────────────────────────
 const FORM_INICIAL = {
@@ -88,34 +88,49 @@ export default function App() {
     setStatus({ type: "info", msg: "Enviando a Google Sheets..." });
 
     const payload = {
-      "RESPONSABLE DEL REPORTE":       form.responsable,
-      "FECHA REPORTE INCIDENCIA":       form.fecha,
       "ref":                            form.ref,
       "PROPIEDAD":                      form.propiedad,
       "CLASIFICACION DE LA INCIDENCIA": clasificacionFinal,
       "DESCRIPCION DE LA INCIDENCIA":   form.descripcion,
       "OPERARIO":                       form.operario,
-      "costo mano obra":                form.costoManoObra,
-      "ACCION TOMADA":                  form.accionTomada,
       "ESTADO":                         form.estado,
+      "ACCION TOMADA":                  form.accionTomada,
+      "FECHA":                          form.fecha,
+      "costo mano obra":                form.costoManoObra,
+      "RESPONSABLE DEL REPORTE":        form.responsable,
     };
 
     try {
-      await fetch(GOOGLE_SCRIPT_URL, {
+      const response = await fetch(GOOGLE_SCRIPT_URL, {
         method: "POST",
-        mode: "no-cors",
-        headers: { "Content-Type": "application/json" },
+        mode: "no-cors", 
         body: JSON.stringify(payload),
       });
+
+      // En modo no-cors no podemos leer la respuesta, pero si no hay error de red, asumimos éxito
       setStatus({ type: "success", msg: "¡Incidencia enviada correctamente a Google Sheets!" });
       setShowSuccess(true);
       setForm(FORM_INICIAL);
       setTimeout(() => setShowSuccess(false), 4000);
+
     } catch (error) {
-      setStatus({ type: "error", msg: "Error al enviar: " + error.message });
+      console.error("Error al enviar:", error);
+      setStatus({ type: "error", msg: "Error de red: " + error.message });
     } finally {
       setLoading(false);
     }
+  };
+
+  // Función para descargar una copia local si falla la red
+  const downloadBackup = () => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(form, null, 2));
+    const downloadAnchorNode = document.createElement('a');
+    downloadAnchorNode.setAttribute("href", dataStr);
+    downloadAnchorNode.setAttribute("download", `incidencia_${form.propiedad || 'sin_nombre'}_${form.fecha}.json`);
+    document.body.appendChild(downloadAnchorNode);
+    downloadAnchorNode.click();
+    downloadAnchorNode.remove();
+    setStatus({ type: "info", msg: "Copia de seguridad descargada localmente." });
   };
 
   return (
@@ -355,6 +370,9 @@ export default function App() {
               onClick={() => { setForm(FORM_INICIAL); setStatus({ type: "", msg: "" }); }}>
               Limpiar
             </button>
+            <button type="button" className="btn btn-backup" onClick={downloadBackup}>
+              Respaldar Local
+            </button>
             <button type="submit" className="btn btn-primary" disabled={loading}>
               {loading
                 ? <><Loader2 size={18} className="spin" /> Enviando...</>
@@ -365,7 +383,7 @@ export default function App() {
       </motion.div>
 
       <footer className="app-footer">
-        Incidencias 2026 · Hoja: <strong>Incidencia 2026</strong>
+        Incidencias 2026 · Hoja: <strong>INCIDENCIA 2026</strong>
       </footer>
     </div>
   );
