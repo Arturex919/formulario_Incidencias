@@ -22,3 +22,15 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# ── Credenciales y secretos (NO subir a GitHub) ──────────────────────────────
+*.json
+!package.json
+!package-lock.json
+!public/data.json
+# Clave de servicio Google Cloud
+rental-holidays-*.json
+*-e52e75d23cfd.json
+.env
+.env.*
+secrets/
