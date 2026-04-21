@@ -383,6 +383,16 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   transition: border-color 0.25s, box-shadow 0.25s, background 0.35s;
 }
 
+[data-theme="dark"] .select-wrap select {
+  background: var(--input-bg);
+  color: var(--text-main);
+}
+
+[data-theme="dark"] .select-wrap select option {
+  background: #ffffff;
+  color: #1e1b4b;
+}
+
 .select-wrap select.placeholder { color: var(--text-placeholder); }
 
 .select-wrap select:focus {

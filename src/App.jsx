@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   FileText, Send, CheckCircle, AlertCircle, ChevronDown,
   User, Home, Calendar, ClipboardList, Wrench, DollarSign,
-  MessageSquare, PlusCircle, Loader2, Moon, Sun
+  MessageSquare, PlusCircle, Loader2, Moon, Sun, Truck
 } from 'lucide-react';
 
 // ─── Opciones del desplegable (igual que en el Excel) ──────────────────────────
@@ -26,7 +26,7 @@ const CLASIFICACIONES = [
   "Otro",
 ];
 
-const ESTADOS_INICIALES = ["PENDIENTE", "EN PROCESO", "RESUELTO"];
+const ESTADOS_INICIALES = ["PENDIENTE", "RESUELTA"];
 
 const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz3dwhI5x6PtcYdLzprRso31_tdWm64DROVFE4L8cDL65UUfyb9u5pgWoGbzUGgPTGI/exec";
 
@@ -40,8 +40,10 @@ const FORM_INICIAL = {
   clasificacionOtro: "",
   descripcion: "",
   operario: "",
+  proveedor: "",
   costoManoObra: "",
   accionTomada: "",
+  planAccion: "",
   estado: "PENDIENTE",
 };
 
@@ -85,7 +87,7 @@ export default function App() {
     }
 
     setLoading(true);
-    setStatus({ type: "info", msg: "Enviando a Google Sheets..." });
+    setStatus({ type: "info", msg: "Enviando incidencia..." });
 
     const payload = {
       "ref":                            form.ref,
@@ -93,9 +95,12 @@ export default function App() {
       "CLASIFICACION DE LA INCIDENCIA": clasificacionFinal,
       "DESCRIPCION DE LA INCIDENCIA":   form.descripcion,
       "OPERARIO":                       form.operario,
+      "PROVEEDOR":                      form.proveedor,
       "ESTADO":                         form.estado,
       "ACCION TOMADA":                  form.accionTomada,
+      "PLAN DE ACCION":                 form.planAccion,
       "FECHA":                          form.fecha,
+      "FECHA REPORTE INCIDENCIA":       form.fecha,
       "costo mano obra":                form.costoManoObra,
       "RESPONSABLE DEL REPORTE":        form.responsable,
     };
@@ -108,7 +113,7 @@ export default function App() {
       });
 
       // En modo no-cors no podemos leer la respuesta, pero si no hay error de red, asumimos éxito
-      setStatus({ type: "success", msg: "¡Incidencia enviada correctamente a Google Sheets!" });
+      setStatus({ type: "success", msg: "¡Tu reporte ha sido procesado correctamente!" });
       setShowSuccess(true);
       setForm(FORM_INICIAL);
       setTimeout(() => setShowSuccess(false), 4000);
@@ -119,18 +124,6 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  };
-
-  // Función para descargar una copia local si falla la red
-  const downloadBackup = () => {
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(form, null, 2));
-    const downloadAnchorNode = document.createElement('a');
-    downloadAnchorNode.setAttribute("href", dataStr);
-    downloadAnchorNode.setAttribute("download", `incidencia_${form.propiedad || 'sin_nombre'}_${form.fecha}.json`);
-    document.body.appendChild(downloadAnchorNode);
-    downloadAnchorNode.click();
-    downloadAnchorNode.remove();
-    setStatus({ type: "info", msg: "Copia de seguridad descargada localmente." });
   };
 
   return (
@@ -146,7 +139,7 @@ export default function App() {
             exit={{ opacity: 0, y: -30 }}
           >
             <CheckCircle size={20} />
-            ¡Incidencia registrada en la hoja "Incidencia 2026"!
+            ¡La incidencia se ha guardado correctamente!
           </motion.div>
         )}
       </AnimatePresence>
@@ -313,12 +306,27 @@ export default function App() {
                 value={form.operario} onChange={handleChange} />
             </div>
             <div className="field-group">
+              <label htmlFor="proveedor">
+                <Truck size={14} /> Proveedor
+              </label>
+              <input id="proveedor" name="proveedor" type="text"
+                placeholder="Nombre del proveedor..."
+                value={form.proveedor} onChange={handleChange} />
+            </div>
+          </div>
+
+          {/* FILA 4 */}
+          <div className="form-grid">
+            <div className="field-group">
               <label htmlFor="costoManoObra">
                 <DollarSign size={14} /> Costo mano de obra (€)
               </label>
               <input id="costoManoObra" name="costoManoObra" type="number"
                 min="0" step="0.01" placeholder="0.00"
                 value={form.costoManoObra} onChange={handleChange} />
+            </div>
+            <div className="field-group">
+              {/* Espacio reservado o campo extra si fuese necesario */}
             </div>
           </div>
 
@@ -330,6 +338,16 @@ export default function App() {
             <textarea id="accionTomada" name="accionTomada" rows={3}
               placeholder="Describe la acción tomada para resolver la incidencia..."
               value={form.accionTomada} onChange={handleChange} />
+          </div>
+
+          {/* PLAN DE ACCIÓN */}
+          <div className="field-group full-width">
+            <label htmlFor="planAccion">
+              <Wrench size={14} /> Plan de acción
+            </label>
+            <textarea id="planAccion" name="planAccion" rows={4}
+              placeholder="Describe el plan de acción futuro si es necesario..."
+              value={form.planAccion} onChange={handleChange} />
           </div>
 
           {/* ESTADO */}
@@ -370,20 +388,17 @@ export default function App() {
               onClick={() => { setForm(FORM_INICIAL); setStatus({ type: "", msg: "" }); }}>
               Limpiar
             </button>
-            <button type="button" className="btn btn-backup" onClick={downloadBackup}>
-              Respaldar Local
-            </button>
             <button type="submit" className="btn btn-primary" disabled={loading}>
               {loading
                 ? <><Loader2 size={18} className="spin" /> Enviando...</>
-                : <><Send size={18} /> Enviar a Google Sheets</>}
+                : <><Send size={18} /> Enviar Incidencia</>}
             </button>
           </div>
         </form>
       </motion.div>
 
       <footer className="app-footer">
-        Incidencias 2026 · Hoja: <strong>INCIDENCIA 2026</strong>
+        Incidencias 2026
       </footer>
     </div>
   );
