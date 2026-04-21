@@ -1,23 +1,41 @@
 /**
- * Google Apps Script — Formulario Incidencias 2026 (VERSIÓN FINAL VINCULADA)
+ * Google Apps Script — Formulario Incidencias 2026 (VERSIÓN FINAL V5 - LECTURA Y ESCRITURA)
  * Nota: Este script debe estar dentro del Google Sheets (Extensiones > Apps Script)
  */
 
 const SHEET_NAME = "INCIDENCIA 2026";
 
-function doGet() {
+function doGet(e) {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheets = ss.getSheets();
-    
-    // Búsqueda flexible de la hoja
-    const sheet = sheets.find(s => s.getName().trim().toUpperCase() === SHEET_NAME.toUpperCase());
+    const sheet = ss.getSheets().find(s => s.getName().trim().toUpperCase() === SHEET_NAME.toUpperCase());
     
     if (!sheet) {
-      const sheetNames = sheets.map(s => s.getName());
-      return ContentService.createTextOutput("⛔ Error: No encuentro la hoja '" + SHEET_NAME + "'. \n\nHojas disponibles: " + sheetNames.join(", "));
+      return ContentService.createTextOutput(JSON.stringify({ error: "Hoja no encontrada" }))
+        .setMimeType(ContentService.MimeType.JSON);
     }
     
+    // Si viene la acción de leer datos
+    if (e.parameter.action === "read") {
+      const data = sheet.getDataRange().getValues();
+      const headers = data[0];
+      const rows = data.slice(1);
+      
+      const jsonData = rows
+        .filter(row => row[0] !== "") // Solo filas rellenadas (basado en Responsable)
+        .map(row => {
+          const obj = {};
+          headers.forEach((header, i) => {
+            obj[header] = row[i];
+          });
+          return obj;
+        });
+      
+      return ContentService.createTextOutput(JSON.stringify(jsonData))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // Comprobación de conexión estándar
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     return ContentService.createTextOutput("✅ Conexión Ok. \n\nHoja detectada: " + sheet.getName() + "\nColumnas: " + headers.join(" | "));
   } catch (e) {
@@ -28,8 +46,7 @@ function doGet() {
 function doPost(e) {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheets = ss.getSheets();
-    const sheet = sheets.find(s => s.getName().trim().toUpperCase() === SHEET_NAME.toUpperCase());
+    const sheet = ss.getSheets().find(s => s.getName().trim().toUpperCase() === SHEET_NAME.toUpperCase());
     
     if (!sheet) throw new Error("No se encuentra la hoja");
 

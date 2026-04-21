@@ -6,9 +6,9 @@
 ══════════════════════════════════════════════════════════════════════════════ */
 :root,
 [data-theme="dark"] {
-  --primary:        #6366f1;
-  --primary-dark:   #4f46e5;
-  --primary-glow:   rgba(99, 102, 241, 0.35);
+  --primary:        #ff4d4d;
+  --primary-dark:   #e63939;
+  --primary-glow:   rgba(255, 77, 77, 0.35);
   --accent:         #a78bfa;
   --success:        #10b981;
   --error:          #f43f5e;
@@ -47,9 +47,9 @@
    MODO CLARO
 ══════════════════════════════════════════════════════════════════════════════ */
 [data-theme="light"] {
-  --primary:        #4f46e5;
-  --primary-dark:   #3730a3;
-  --primary-glow:   rgba(79, 70, 229, 0.25);
+  --primary:        #ff4d4d;
+  --primary-dark:   #e63939;
+  --primary-glow:   rgba(255, 77, 77, 0.2);
   --accent:         #7c3aed;
   --success:        #059669;
   --error:          #dc2626;
@@ -140,7 +140,7 @@ body::before {
 }
 
 .header-icon-wrap {
-  background: linear-gradient(135deg, var(--primary), var(--accent));
+  background: linear-gradient(135deg, #ff4d4d, #ff9999);
   border-radius: 14px;
   width: 56px;
   height: 56px;
@@ -161,18 +161,19 @@ body::before {
   background: rgba(255, 255, 255, 0.1);
   transform: translateY(-2px);
 }
-  box-shadow: 0 8px 24px var(--primary-glow);
+  box-shadow: 0 8px 24px rgba(255, 77, 77, 0.25);
   color: #fff;
 }
 
 h1 {
-  font-size: 1.85rem;
+  font-size: 2rem;
   font-weight: 800;
-  background: linear-gradient(90deg, var(--primary), var(--accent));
+  background: linear-gradient(90deg, #ff4d4d, #ff9999);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
   line-height: 1.2;
+  letter-spacing: 0.05em;
 }
 
 .subtitle {
@@ -517,13 +518,127 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 .animate-fade-in { animation: fadeIn 0.55s ease-out forwards; }
 
-/* ── Footer ───────────────────────────────────────────────────────────────── */
-.app-footer {
-  text-align: center;
-  font-size: 0.8rem;
+/* ── Tabs / Navegación ────────────────────────────────────────────────────── */
+.tabs-container {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+  padding: 0.4rem;
+  background: var(--toggle-bg);
+  border-radius: 16px;
+  width: fit-content;
+  border: 1px solid var(--toggle-border);
+}
+
+.tab-btn {
+  padding: 0.6rem 1.4rem;
+  border-radius: 12px;
+  border: none;
+  background: transparent;
   color: var(--text-muted);
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.tab-btn.active {
+  background: var(--card-bg);
+  color: var(--text-main);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.tab-btn:hover:not(.active) {
+  color: var(--text-main);
+  background: var(--toggle-hover);
+}
+
+/* ── Historial (Listado) ────────────────────────────────────────────────── */
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.history-card {
+  padding: 1.8rem;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid var(--divider);
+  padding-bottom: 1rem;
+}
+
+.card-title-wrap h3 {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-bottom: 0.2rem;
+}
+
+.card-date {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.badge-status {
+  padding: 0.35rem 0.8rem;
+  border-radius: 50px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.badge-status.pendiente { background: rgba(244, 63, 94, 0.15); color: #fb7185; border: 1px solid rgba(244, 63, 94, 0.3); }
+.badge-status.resuelta { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 1.5rem;
+}
+
+.data-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.data-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-label);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.data-value {
+  font-size: 0.95rem;
+  color: var(--text-main);
+  font-weight: 500;
+}
+
+.full-width-item {
+  grid-column: 1 / -1;
   padding-top: 0.5rem;
-  border-top: 1px solid var(--divider);
+}
+
+.description-box {
+  background: var(--toggle-bg);
+  padding: 1rem;
+  border-radius: 12px;
+  border: 1px solid var(--divider);
+  font-style: italic;
+  color: var(--text-main);
+  margin-top: 0.4rem;
 }
 
 /* ── Scrollbar ────────────────────────────────────────────────────────────── */
