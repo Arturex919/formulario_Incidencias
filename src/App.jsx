@@ -28,7 +28,7 @@ const CLASIFICACIONES = [
 
 const ESTADOS_INICIALES = ["PENDIENTE", "EN PROCESO", "RESUELTO"];
 
-const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby-TDE7HoQ4k0kaKOxrUmSTvUCvMWsu0hHaBUjUlwruOszizehtI1YbxFmWghluOrFzhA/exec";
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz3dwhI5x6PtcYdLzprRso31_tdWm64DROVFE4L8cDL65UUfyb9u5pgWoGbzUGgPTGI/exec";
 
 // ─── Estado inicial del formulario ────────────────────────────────────────────
 const FORM_INICIAL = {
