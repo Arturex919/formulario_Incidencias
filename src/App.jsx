@@ -18,7 +18,7 @@ const CLASIFICACIONES = [
 
 const ESTADOS_INICIALES = ["PENDIENTE", "RESUELTA"];
 
-const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzDZXQn5qNUaXdgSYPE88sDP4SmZ45HDTZGRl3qwrzli9u15H_pQ3nf2tbI7uRmhUse/exec";
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxqOHyHvU_QuNv8R_ZDi4PZ02JhnTAUq7LDN-h84OWDmkayFwsS3zDBlG2_JZoex3Vn/exec";
 
 // ─── Estado inicial del formulario ────────────────────────────────────────────
 const FORM_INICIAL = {
@@ -97,9 +97,12 @@ export default function App() {
   const [uploadStatus, setUploadStatus]   = useState(null);
   const [previewUrl, setPreviewUrl]       = useState(null);
   const [previewType, setPreviewType]     = useState(null);
+  // Nombre del archivo seleccionado para el campo REF
+  const [selectedRefFileName, setSelectedRefFileName] = useState("");
 
   // Administración: Colores y Trimestres
   const [adminScan, setAdminScan]               = useState(null);
+  const [adminError, setAdminError]             = useState(null);
   const [loadingAdmin, setLoadingAdmin]         = useState(false);
   const [selectedAdminYear, setSelectedAdminYear] = useState(currentYear.toString());
   const [colorAssignments, setColorAssignments] = useState({});
@@ -143,9 +146,12 @@ export default function App() {
 
       const resAll = await fetch(`${GOOGLE_SCRIPT_URL}?action=getAllRefs${params}`);
       const dataAll = await resAll.json();
+      // La API devuelve la lista completa de archivos con fullName
       if (Array.isArray(dataAll.refs)) setExistingRefs(dataAll.refs);
+      else setExistingRefs([]);
     } catch (error) {
       console.error("Error al obtener referencias:", error);
+      setExistingRefs([]);
     } finally {
       setLoadingRefs(false);
     }
@@ -153,13 +159,25 @@ export default function App() {
 
   const fetchScanStructure = async (year) => {
     setLoadingAdmin(true);
+    setAdminError(null);
     try {
       const res  = await fetch(`${GOOGLE_SCRIPT_URL}?action=scanStructure&year=${year}`);
       const data = await res.json();
-      setAdminScan(data);
-      setColorAssignments({});
+      if (data && data.error) {
+        setAdminError(data.error);
+        setAdminScan(null);
+      } else if (data && data.structure && data.availability && data.colorPalette) {
+        setAdminScan(data);
+        setColorAssignments({});
+      } else {
+        // Respuesta inesperada — mostramos error amigable
+        setAdminError('Respuesta inesperada de Drive. Verifica permisos y estructura de carpetas.');
+        setAdminScan(null);
+      }
     } catch (err) {
       console.error('Error escaneo Drive:', err);
+      setAdminError('Error de conexión con Drive: ' + err.message);
+      setAdminScan(null);
     } finally {
       setLoadingAdmin(false);
     }
@@ -271,7 +289,12 @@ export default function App() {
     setUploadStatus({ type: 'info', msg: 'Subiendo factura y generando referencia...' });
 
     try {
-      const currentNextRef = nextRef; // Guardamos la referencia que se le va a asignar
+      const currentNextRef = nextRef; // Referencia que se asignará
+      // Nombre final: [nombre original sin extensión] [ref].[extensión]
+      const ext = file.name.includes('.') ? file.name.split('.').pop() : 'pdf';
+      const baseName = file.name.replace(/\.[^.]+$/, ''); // Sin extensión
+      const finalFileName = `${baseName} ${currentNextRef}.${ext}`;
+
       const reader = new FileReader();
       
       reader.onload = async (event) => {
@@ -280,7 +303,10 @@ export default function App() {
           const payload = {
             action: "uploadInvoice",
             fileBase64: base64,
-            fileName: file.name
+            fileName: file.name,       // nombre original → backend construye [nombre] [ref].[ext]
+            refNumber: currentNextRef, // referencia a concatenar
+            month: selectedMonth,      // mes para encontrar la carpeta trimestral correcta
+            year:  selectedYear
           };
 
           // POST a Apps Script con no-cors para evitar el bloqueo del navegador
@@ -290,13 +316,14 @@ export default function App() {
             body: JSON.stringify(payload)
           });
 
-          // Si llega aquí, asumimos éxito (no-cors no nos deja leer la respuesta json)
+          // Asumimos éxito (no-cors no nos deja leer la respuesta json)
           setForm(prev => ({ ...prev, ref: currentNextRef }));
+          setSelectedRefFileName(finalFileName);
           
-          // Recargamos las referencias desde Drive para ver el nuevo archivo
+          // Recargamos las referencias desde Drive
           await fetchNextRef(selectedMonth, selectedYear);
 
-          setUploadStatus({ type: 'success', msg: `✅ Factura subida: Ref ${currentNextRef}` });
+          setUploadStatus({ type: 'success', msg: `✅ Factura subida: "${finalFileName}"` });
           setShowSuccess(true);
           setTimeout(() => setShowSuccess(false), 3000);
         } catch (postError) {
@@ -553,9 +580,20 @@ export default function App() {
                     {loadingRefs && <Loader2 size={16} className="spin" style={{color:'var(--primary)'}} />}
                   </div>
 
-                  {/* Desplegable de referencias */}
+                  {/* Desplegable de referencias — muestra el nombre original del archivo */}
                   <div className="select-wrap">
-                    <select id="ref" name="ref" value={form.ref} onChange={handleChange}>
+                    <select
+                      id="ref"
+                      name="ref"
+                      value={form.ref}
+                      onChange={e => {
+                        const val = e.target.value;
+                        setForm(prev => ({ ...prev, ref: val }));
+                        // Guardar el nombre del archivo asociado a la ref
+                        const found = existingRefs.find(r => r.ref === val);
+                        setSelectedRefFileName(found ? found.fullName : "");
+                      }}
+                    >
                       <option value="">— Seleccionar referencia —</option>
                       {nextRef !== "..." && (
                         <option value={nextRef}>⭐ Nueva: {nextRef} (siguiente disponible)</option>
@@ -563,8 +601,9 @@ export default function App() {
                       {existingRefs.length > 0 && (
                         <optgroup label={`── ${selectedMonth} ${selectedYear} en Drive (${existingRefs.length}) ──`}>
                           {existingRefs.map(item => (
-                            <option key={item.ref} value={item.ref}>
-                              {item.ref} — {item.fullName.replace(/\.pdf$/i,'').replace(/^\d+\s*[-.]?\s*/,'')}
+                            <option key={item.fileId || item.ref} value={item.ref}>
+                              {/* Mostramos el nombre completo del archivo tal como está en Drive */}
+                              {item.fullName}
                             </option>
                           ))}
                         </optgroup>
@@ -575,6 +614,11 @@ export default function App() {
                     </select>
                     <ChevronDown size={18} className="select-arrow" />
                   </div>
+                  {selectedRefFileName && (
+                    <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>
+                      📄 Archivo: <strong>{selectedRefFileName}</strong>
+                    </p>
+                  )}
                 </div>
                 <div className="field-group">
                   <label htmlFor="propiedad">
@@ -688,7 +732,7 @@ export default function App() {
               </div>
             </form>
           </motion.div>
-        ) : (
+        ) : activeTab === "historial" ? (
           /* HISTORIAL */
           <motion.div key="history" className="history-list" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
             {loadingHistory ? (
@@ -744,12 +788,9 @@ export default function App() {
               ))
             )}
           </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* ── TAB ADMINISTRACIÓN ──────────────────── */}
-      {activeTab === "administracion" && (
-        <motion.div key="admin" className="glass-card form-card" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
+        ) : (
+          /* ADMINISTRACIÓN — dentro del AnimatePresence para evitar pantalla en blanco */
+          <motion.div key="admin" className="glass-card form-card" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
 
           {/* -- Escaneo de estructura -- */}
           <div className="form-section-title">
@@ -770,8 +811,15 @@ export default function App() {
             </button>
           </div>
 
+          {/* Error de escaneo */}
+          {adminError && (
+            <div className="status-msg error" style={{ margin: '1rem 0' }}>
+              ⚠️ {adminError}
+            </div>
+          )}
+
           {/* Grid de disponibilidad de colores */}
-          {adminScan && (
+          {adminScan && !adminError && (
             <div className="admin-grid-wrap">
               <h3 className="admin-section-title">Disponibilidad de Colores — {adminScan.year}</h3>
               <div className="color-grid">
@@ -905,7 +953,8 @@ export default function App() {
             <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '1.5rem 0' }}>Sin archivos. Pulsa "Buscar Facturas" para consultar Drive.</p>
           )}
         </motion.div>
-      )}
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -33,6 +33,20 @@ function getTargetSheet() {
   return ss.getSheets().find(s => s.getName().trim().toUpperCase() === SHEET_NAME.toUpperCase());
 }
 
+// Helper: obtiene el color de una carpeta de forma segura (getColor puede no estar disponible)
+function getFolderColor(folder) {
+  try {
+    return (typeof folder.getColor === 'function') ? (folder.getColor() || "") : "";
+  } catch (_) { return ""; }
+}
+
+// Helper: hace match del hex del color con la paleta
+function getColorInfo(folder) {
+  const raw = getFolderColor(folder);
+  const match = COLOR_PALETTE.find(c => c.hex.toUpperCase() === raw.toUpperCase());
+  return match ? { id: match.id, label: match.label, hex: match.hex } : { id: "GRAY", label: "Sin color", hex: "#9AA0A6" };
+}
+
 // ── Helper para respuestas JSON ────────────────────────────────────────────────
 function jsonResponse(data) {
   return ContentService.createTextOutput(JSON.stringify(data))
@@ -91,7 +105,13 @@ function doPost(e) {
     const data = JSON.parse(e.postData.contents);
 
     if (data.action === "uploadInvoice") {
-      return jsonResponse(saveInvoiceToDrive(data.fileBase64, data.fileName));
+      return jsonResponse(saveInvoiceToDrive(
+        data.fileBase64,
+        data.fileName,
+        data.refNumber || null,
+        data.month     || null,
+        data.year      || null
+      ));
     }
 
     if (data.action === "createYearStructure") {
@@ -139,9 +159,9 @@ function scanDriveStructure(year) {
   while (folders.hasNext()) {
     const folder = folders.next();
     const name   = folder.getName().toUpperCase();
-    const color  = (folder.getColor() || "GRAY").toUpperCase().replace("#","");
-    const matchesYear = name.includes(yearStr);
+    const ci     = getColorInfo(folder);
 
+    // Las carpetas NO llevan año en el nombre — buscamos solo por keywords de trimestre
     let quarter = null;
     for (const [q, cfg] of Object.entries(QUARTER_CONFIG)) {
       if (cfg.keywords.some(k => name.includes(k))) { quarter = q; break; }
@@ -151,8 +171,9 @@ function scanDriveStructure(year) {
     structure[quarter].push({
       id: folder.getId(),
       name: folder.getName(),
-      color: color,
-      matchesYear: matchesYear
+      color: ci.id,
+      colorHex: ci.hex,
+      matchesYear: true
     });
   }
 
@@ -160,7 +181,7 @@ function scanDriveStructure(year) {
   const allColorIds = COLOR_PALETTE.map(c => c.id);
   const availability = {};
   for (const q of ["Q1","Q2","Q3","Q4"]) {
-    const used = structure[q].filter(f => f.matchesYear).map(f => f.color);
+    const used = structure[q].map(f => f.color);
     availability[q] = {
       used: used,
       available: allColorIds.filter(c => !used.includes(c))
@@ -180,7 +201,6 @@ function getMonthFiles(month, year) {
     if (cfg.months.includes(monthNum)) { quarterKey = q; break; }
   }
 
-  const yearStr = year || new Date().getFullYear().toString();
   const root    = DriveApp.getFolderById(DRIVE_ROOT_FOLDER_ID);
   const folders = root.getFolders();
   const results = [];
@@ -190,27 +210,46 @@ function getMonthFiles(month, year) {
     const name   = folder.getName().toUpperCase();
     const cfg    = QUARTER_CONFIG[quarterKey];
 
-    if (!name.includes(yearStr) || !cfg.keywords.some(k => name.includes(k))) continue;
+    // Buscar por keywords del trimestre SIN requerir el año en el nombre
+    if (!cfg.keywords.some(k => name.includes(k))) continue;
 
-    const folderColor = (folder.getColor() || "GRAY").toUpperCase();
-    const colorInfo   = COLOR_PALETTE.find(c => c.id === folderColor) || { label: folderColor, hex: "#9AA0A6" };
-    const files       = folder.getFiles();
+    const colorInfo = getColorInfo(folder);
 
-    while (files.hasNext()) {
-      const file     = files.next();
-      const fileName = file.getName();
-      const refMatch = fileName.match(/(\d{3})/);
-      const ref      = refMatch ? refMatch[1] : "---";
-      const clientMatch = fileName.replace(/\.pdf$/i, '').match(/^\d+\s*[-–]\s*(.+)$/);
-      const clientName  = clientMatch ? clientMatch[1].trim() : fileName.replace(/\.pdf$/i,'');
+    // Buscar subcarpeta del mes (ej: carpeta "ABRIL" dentro de "ABRIL-MAYO-JUNIO")
+    const monthUpper = month.toUpperCase();
+    const subFolders = folder.getFoldersByName(monthUpper);
+    const fileSources = [];
 
-      results.push({
-        ref, fullName: fileName, clientName,
-        fileId: file.getId(), fileUrl: file.getUrl(),
-        folderName: folder.getName(),
-        colorLabel: colorInfo.label, colorHex: colorInfo.hex
-      });
+    if (subFolders.hasNext()) {
+      // Si existe subcarpeta del mes, listar archivos de ahí
+      fileSources.push(subFolders.next());
+    } else {
+      // Si no hay subcarpeta, listar archivos directamente en la carpeta trimestral
+      fileSources.push(folder);
     }
+
+    fileSources.forEach(src => {
+      const files = src.getFiles();
+      while (files.hasNext()) {
+        const file     = files.next();
+        const fileName = file.getName();
+        // El número de referencia es la secuencia de dígitos al FINAL del nombre (antes de la extensión)
+        const refMatch = fileName.replace(/\.[^.]+$/, '').match(/(\d+)$/);
+        const ref      = refMatch ? refMatch[1].padStart(3, '0') : "---";
+        const clientName = fileName.replace(/\.[^.]+$/, '').replace(/(\s*\d+)$/, '').trim();
+
+        results.push({
+          ref,
+          fullName: fileName,
+          clientName,
+          fileId:     file.getId(),
+          fileUrl:    file.getUrl(),
+          folderName: folder.getName(),
+          colorLabel: colorInfo.label,
+          colorHex:   colorInfo.hex
+        });
+      }
+    });
   }
 
   return results.sort((a, b) => parseInt(a.ref) - parseInt(b.ref));
@@ -243,29 +282,59 @@ function createQuarterlyStructure(year, colorAssignments) {
   return { success: true, year, created };
 }
 
-// ── DRIVE: FACTURAS INCIDENCIAS (carpeta separada FACTURAS_INCIDENCIAS) ────────
+// ── DRIVE: GUARDAR FACTURA EN CARPETA TRIMESTRAL EXISTENTE ───────────────────
 
-function saveInvoiceToDrive(base64Data, originalFileName) {
-  const folder    = getTargetFolder();
-  const nextRef   = getNextInvoiceRef();
-  const paddedRef = nextRef.toString().padStart(3, '0');
-  const newFileName = paddedRef + " - " + originalFileName;
-  const content   = base64Data.split(",")[1] || base64Data;
-  const blob      = Utilities.newBlob(Utilities.base64Decode(content), "application/pdf", newFileName);
-  const file      = folder.createFile(blob);
-  return { success: true, ref: paddedRef, fileUrl: file.getUrl(), fileName: newFileName };
-}
-
-function getTargetFolder(month, year) {
-  const now    = new Date();
+/**
+ * Busca la carpeta trimestral correcta en DRIVE_ROOT_FOLDER_ID y guarda el archivo ahí.
+ * El nombre final del archivo será: [nombreOriginalSinExtension] [ref].[extension]
+ * data.refNumber: referencia ya calculada desde el frontend (ej: "009")
+ * data.fileName:  nombre original del archivo (ej: "gestoria alviana.pdf")
+ */
+function saveInvoiceToDrive(base64Data, originalFileName, refNumber, month, year) {
   const MONTHS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+  const now    = new Date();
   const tm     = month || MONTHS[now.getMonth()];
-  const ty     = year  || now.getFullYear().toString();
-  const mi     = MONTHS.indexOf(tm);
-  const quarter = "T" + Math.ceil((mi + 1) / 3);
-  const folders = DriveApp.getFoldersByName(INVOICES_ROOT_NAME);
-  const root    = folders.hasNext() ? folders.next() : DriveApp.createFolder(INVOICES_ROOT_NAME);
-  return getOrCreateSubFolder(getOrCreateSubFolder(getOrCreateSubFolder(root, ty), quarter), tm);
+
+  // Calcular el trimestre para el mes actual
+  const monthNum = MONTHS.indexOf(tm) + 1;
+  let quarterKey = "Q4";
+  for (const [q, cfg] of Object.entries(QUARTER_CONFIG)) {
+    if (cfg.months.includes(monthNum)) { quarterKey = q; break; }
+  }
+
+  // Buscar la carpeta trimestral en Drive (sin filtro por año)
+  const root    = DriveApp.getFolderById(DRIVE_ROOT_FOLDER_ID);
+  const folders = root.getFolders();
+  let targetFolder = null;
+
+  while (folders.hasNext()) {
+    const folder = folders.next();
+    const name   = folder.getName().toUpperCase();
+    const cfg    = QUARTER_CONFIG[quarterKey];
+    if (cfg.keywords.some(k => name.includes(k))) {
+      targetFolder = folder;
+      break;
+    }
+  }
+
+  // Si no existe carpeta trimestral, usar el root como fallback
+  if (!targetFolder) targetFolder = root;
+
+  // Construir el nombre final: [baseName] [ref].[ext]
+  const paddedRef  = refNumber ? refNumber.toString().padStart(3, '0') : getNextInvoiceRef(tm).toString().padStart(3, '0');
+  const extMatch   = originalFileName.match(/\.([^.]+)$/);
+  const ext        = extMatch ? extMatch[1] : 'pdf';
+  const baseName   = originalFileName.replace(/\.[^.]+$/, '').trim();
+  const newFileName = baseName + ' ' + paddedRef + '.' + ext;
+
+  // Determinar MIME type basado en la extensión
+  const mimeType = ext.toLowerCase() === 'pdf' ? 'application/pdf' : 'application/octet-stream';
+
+  const content = base64Data.split(",")[1] || base64Data;
+  const blob    = Utilities.newBlob(Utilities.base64Decode(content), mimeType, newFileName);
+  const file    = targetFolder.createFile(blob);
+
+  return { success: true, ref: paddedRef, fileUrl: file.getUrl(), fileName: newFileName };
 }
 
 function getOrCreateSubFolder(parent, name) {
