@@ -22,14 +22,15 @@ function doGet(e) {
       const rows = data.slice(1);
       
       const jsonData = rows
-        .filter(row => row[0] !== "") // Solo filas rellenadas (basado en Responsable)
-        .map(row => {
-          const obj = {};
-          headers.forEach((header, i) => {
-            obj[header] = row[i];
+        .map((row, i) => {
+          if (row[0] === "" && row[1] === "") return null; // Saltar vacías
+          const obj = { rowIndex: i + 2 }; // i + 2 (fila 1 es cabecera, i=0 es fila 2)
+          headers.forEach((header, iCol) => {
+            obj[header] = row[iCol];
           });
           return obj;
-        });
+        })
+        .filter(row => row !== null);
       
       return ContentService.createTextOutput(JSON.stringify(jsonData))
         .setMimeType(ContentService.MimeType.JSON);
@@ -63,16 +64,24 @@ function doPost(e) {
       if (colIndex !== -1) newRow[colIndex] = data[key];
     });
 
-    // 4. Buscar fila vacía (Columna A - Responsable)
-    const values = sheet.getRange("A:A").getValues();
-    let nextRow = 1;
-    while (values[nextRow] && values[nextRow][0] !== "") {
-      nextRow++;
+    // 4. Determinar fila destino
+    let targetRow;
+    if (data.rowIndex && !isNaN(data.rowIndex)) {
+      targetRow = parseInt(data.rowIndex);
+      logSistema("Actualizando fila existente", targetRow);
+    } else {
+      // Buscar siguiente fila vacía (Columna B - Propiedad o A - Responsable)
+      const values = sheet.getRange("B:B").getValues();
+      let nextRow = 1;
+      while (values[nextRow] && values[nextRow][0] !== "") {
+        nextRow++;
+      }
+      targetRow = nextRow + 1;
+      logSistema("Insertando nueva fila", targetRow);
     }
-    nextRow++; // Fila de Excel
 
-    // 5. Insertar fila
-    sheet.getRange(nextRow, 1, 1, newRow.length).setValues([newRow]);
+    // 5. Escribir datos
+    sheet.getRange(targetRow, 1, 1, newRow.length).setValues([newRow]);
     
     return ContentService.createTextOutput("SUCCESS").setMimeType(ContentService.MimeType.TEXT);
 

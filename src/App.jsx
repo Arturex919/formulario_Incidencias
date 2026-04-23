@@ -7,27 +7,18 @@ import {
 } from 'lucide-react';
 // ─── Opciones del desplegable (igual que en el Excel) ──────────────────────────
 const CLASIFICACIONES = [
-  "AVERÍA",
-  "MANTENIMIENTO",
-  "LIMPIEZA",
+  "MOVILIARIO",
   "INSTALACIONES",
-  "ELECTRODOMÉSTICOS",
-  "FONTANERÍA",
-  "ELECTRICIDAD",
-  "CARPINTERÍA",
-  "PINTURA",
-  "CLIMATIZACIÓN",
-  "JARDÍN / EXTERIOR",
-  "SEGURIDAD",
-  "SUMINISTROS",
-  "CHECK-IN / CHECK-OUT",
-  "INCIDENCIA CON HUÉSPED",
-  "Otro",
+  "MANTENIMIENTO",
+  "ELECTRODOMESTICO",
+  "MENAJE",
+  "MALA GESTION",
+  "OTRO",
 ];
 
 const ESTADOS_INICIALES = ["PENDIENTE", "RESUELTA"];
 
-const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyc8fSVHHP4AVdnN3-pN7EH9It0xk29jWvXNJVRuykDb6vis17MpjshPgGiivC43T4S/exec";
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwj2RlyGw1s_VyHD60mnKd3cmyePsSZamv0qgb8uZT2lsPrjt5trB0UBaYqbLSjvvsb/exec";
 
 // ─── Estado inicial del formulario ────────────────────────────────────────────
 const FORM_INICIAL = {
@@ -44,6 +35,7 @@ const FORM_INICIAL = {
   accionTomada: "",
   planAccion: "",
   estado: "PENDIENTE",
+  rowIndex: null,
 };
 
 // Auxiliares
@@ -59,6 +51,22 @@ const formatearFecha = (fechaStr) => {
     }).format(fecha);
   } catch (e) {
     return fechaStr;
+  }
+};
+
+const normalizarFechaParaInput = (fechaRaw) => {
+  if (!fechaRaw) return new Date().toISOString().split("T")[0];
+  try {
+    const d = new Date(fechaRaw);
+    if (isNaN(d.getTime())) return new Date().toISOString().split("T")[0];
+    
+    // Usar componentes locales para evitar desfases de zona horaria
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  } catch (e) {
+    return new Date().toISOString().split("T")[0];
   }
 };
 
@@ -124,12 +132,12 @@ export default function App() {
     // Mapear campos de Excel a campos de Formulario
     const dataToEdit = {
       responsable: inc["RESPONSABLE DEL REPORTE"] || "",
-      fecha:       inc["FECHA"] || inc["FECHA REPORTE INCIDENCIA"] || new Date().toISOString().split("T")[0],
+      fecha:       normalizarFechaParaInput(inc["FECHA"] || inc["FECHA REPORTE INCIDENCIA"]),
       ref:         inc["ref"] || "",
       propiedad:   inc["PROPIEDAD"] || "",
       clasificacion: CLASIFICACIONES.includes(inc["CLASIFICACION DE LA INCIDENCIA"]) 
                      ? inc["CLASIFICACION DE LA INCIDENCIA"] 
-                     : "Otro",
+                     : "OTRO",
       clasificacionOtro: CLASIFICACIONES.includes(inc["CLASIFICACION DE LA INCIDENCIA"])
                          ? ""
                          : inc["CLASIFICACION DE LA INCIDENCIA"] || "",
@@ -140,6 +148,7 @@ export default function App() {
       accionTomada: inc["ACCION TOMADA"] || "",
       planAccion:   inc["PLAN DE ACCION"] || "",
       estado:       inc["ESTADO"] || "PENDIENTE",
+      rowIndex:     inc.rowIndex,
     };
 
     setForm(dataToEdit);
@@ -160,7 +169,7 @@ export default function App() {
   };
 
   const clasificacionFinal =
-    form.clasificacion === "Otro" ? form.clasificacionOtro : form.clasificacion;
+    form.clasificacion === "OTRO" ? form.clasificacionOtro : form.clasificacion;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -187,6 +196,7 @@ export default function App() {
       "FECHA REPORTE INCIDENCIA":       form.fecha,
       "costo mano obra":                form.costoManoObra,
       "RESPONSABLE DEL REPORTE":        form.responsable,
+      "rowIndex":                       form.rowIndex,
     };
 
     try {
@@ -336,7 +346,7 @@ export default function App() {
                 </div>
 
                 <AnimatePresence>
-                  {form.clasificacion === "Otro" && (
+                  {form.clasificacion === "OTRO" && (
                     <motion.div className="otro-wrap" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }}>
                       <input id="clasificacionOtro" name="clasificacionOtro" type="text"
                         value={form.clasificacionOtro} onChange={handleChange} autoFocus />
