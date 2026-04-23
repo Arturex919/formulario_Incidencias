@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   FileText, Send, CheckCircle, AlertCircle, ChevronDown,
   User, Home, Calendar, ClipboardList, Wrench, DollarSign,
-  MessageSquare, PlusCircle, Loader2, Moon, Sun, Truck, Eraser, Pencil
+  MessageSquare, PlusCircle, Loader2, Moon, Sun, Truck, Eraser, Pencil, FolderPlus
 } from 'lucide-react';
 // ─── Opciones del desplegable (igual que en el Excel) ──────────────────────────
 const CLASIFICACIONES = [
@@ -18,7 +18,7 @@ const CLASIFICACIONES = [
 
 const ESTADOS_INICIALES = ["PENDIENTE", "RESUELTA"];
 
-const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbykR9VtRTZ0mI4boRurq4NhEueW_T3pFeMPgVXZsuqWBCiElzwDPgaKk1_QAHzZ9bw5/exec";
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxNRk5IpbVyRBhVjxy9MA_mLxceJW8fHGhOy2r5L63im00DqOhb4k-_FKM_ivgu79Ed/exec";
 
 // ─── Estado inicial del formulario ────────────────────────────────────────────
 const FORM_INICIAL = {
@@ -203,18 +203,41 @@ export default function App() {
   const handleCreateStructure = async () => {
     if (Object.keys(colorAssignments).length === 0) return;
     setCreatingStructure(true);
+    setCreateResult(null);
     try {
-      await fetch(GOOGLE_SCRIPT_URL, {
+      const res = await fetch(GOOGLE_SCRIPT_URL, {
         method: 'POST',
         mode: 'no-cors',
         body: JSON.stringify({ action: 'createYearStructure', year: selectedAdminYear, colorAssignments })
       });
-      setCreateResult({ success: true, msg: `Estructura ${selectedAdminYear} enviada a Drive.` });
-      setTimeout(() => fetchScanStructure(selectedAdminYear), 2000);
+      setCreateResult({ success: true, msg: `✅ Estructura ${selectedAdminYear} creada en Drive (con subcarpetas de meses).` });
+      setTimeout(() => fetchScanStructure(selectedAdminYear), 2500);
     } catch (err) {
-      setCreateResult({ success: false, msg: 'Error: ' + err.message });
+      setCreateResult({ success: false, msg: '❌ Error: ' + err.message });
     } finally {
       setCreatingStructure(false);
+    }
+  };
+
+  const [ensuringMonths, setEnsuringMonths] = useState(false);
+  const [ensureResult, setEnsureResult]     = useState(null);
+
+  const handleEnsureMonths = async () => {
+    setEnsuringMonths(true);
+    setEnsureResult(null);
+    try {
+      const res  = await fetch(`${GOOGLE_SCRIPT_URL}?action=ensureMonths&year=${selectedAdminYear}`);
+      const data = await res.json();
+      if (data.success) {
+        const summary = data.results.map(r => `${r.quarter}: ${r.status}`).join(' | ');
+        setEnsureResult({ success: true, msg: `✅ Meses verificados: ${summary}` });
+      } else {
+        setEnsureResult({ success: false, msg: '⚠️ ' + JSON.stringify(data) });
+      }
+    } catch (err) {
+      setEnsureResult({ success: false, msg: '❌ Error: ' + err.message });
+    } finally {
+      setEnsuringMonths(false);
     }
   };
 
@@ -888,79 +911,27 @@ export default function App() {
             </div>
           )}
 
-          {/* Selector Mensual de Facturas */}
+          {/* ── BARRA: GARANTIZAR SUBCARPETAS DE MES ── */}
           <div className="form-section-title" style={{ marginTop: '2rem' }}>
-            <FileText size={20} className="icon-accent" />
-            <span>Selector de Facturas por Mes</span>
+            <FolderPlus size={20} className="icon-accent" />
+            <span>Verificar Subcarpetas de Meses</span>
           </div>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', margin: '0 0 1rem' }}>
+            Crea automáticamente las subcarpetas de cada mes dentro de los trimestres del año seleccionado.
+            Úsalo si las carpetas trimestrales ya existen pero les faltan los meses.
+          </p>
           <div className="admin-toolbar">
-            <div className="select-wrap">
-              <select value={selectedAdminMonth} onChange={e => setSelectedAdminMonth(e.target.value)}>
-                {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
-              </select>
-              <ChevronDown size={16} className="select-arrow" />
-            </div>
-            <div className="select-wrap" style={{ maxWidth: 140 }}>
-              <select value={selectedAdminYear} onChange={e => setSelectedAdminYear(e.target.value)}>
-                {[currentYear-1, currentYear, currentYear+1].map(y => <option key={y} value={y}>{y}</option>)}
-              </select>
-              <ChevronDown size={16} className="select-arrow" />
-            </div>
-            <button className="btn btn-secondary" onClick={() => fetchMonthFiles(selectedAdminMonth, selectedAdminYear)} disabled={loadingMonthFiles}>
-              {loadingMonthFiles ? <Loader2 size={16} className="spin" /> : <FileText size={16} />}
-              Buscar Facturas
+            <button className="btn btn-secondary" onClick={handleEnsureMonths} disabled={ensuringMonths}>
+              {ensuringMonths ? <Loader2 size={16} className="spin" /> : <FolderPlus size={16} />}
+              Crear Meses en Trimestres ({selectedAdminYear})
             </button>
           </div>
-
-          {monthFiles.length > 0 && (
-            <div className="month-files-table-wrap">
-              <table className="month-files-table">
-                <thead>
-                  <tr>
-                    <th>REF</th>
-                    <th>Nombre Archivo</th>
-                    <th>Cliente / Descripción</th>
-                    <th>Carpeta (Color)</th>
-                    <th>Acción</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {monthFiles.map((file, i) => (
-                    <tr key={i}>
-                      <td><span className="ref-badge">{file.ref}</span></td>
-                      <td className="file-name-cell">{file.fullName}</td>
-                      <td>{file.clientName}</td>
-                      <td>
-                        <span className="color-dot" style={{ background: file.colorHex }}></span>
-                        {file.colorLabel}
-                      </td>
-                      <td>
-                        <button
-                          className="btn btn-secondary"
-                          style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem' }}
-                          onClick={() => {
-                            setForm(prev => ({ ...prev, ref: file.ref }));
-                            setActiveTab('nuevo');
-                          }}
-                        >
-                          Usar REF
-                        </button>
-                        <a href={file.fileUrl} target="_blank" rel="noreferrer"
-                          className="btn btn-secondary"
-                          style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem', marginLeft: '0.4rem' }}
-                        >
-                          Ver ↗
-                        </a>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {ensureResult && (
+            <div className={`status-msg ${ensureResult.success ? 'success' : 'error'}`} style={{ marginTop: '0.5rem' }}>
+              {ensureResult.msg}
             </div>
           )}
-          {!loadingMonthFiles && monthFiles.length === 0 && (
-            <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '1.5rem 0' }}>Sin archivos. Pulsa "Buscar Facturas" para consultar Drive.</p>
-          )}
+
           </motion.div>
         )}
 
