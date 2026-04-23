@@ -18,7 +18,7 @@ const CLASIFICACIONES = [
 
 const ESTADOS_INICIALES = ["PENDIENTE", "RESUELTA"];
 
-const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwj2RlyGw1s_VyHD60mnKd3cmyePsSZamv0qgb8uZT2lsPrjt5trB0UBaYqbLSjvvsb/exec";
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyD6TIF6APy92jPReV5x37nQXQpW_WdJBC8qtdNAZ46qBlsLuuaQZVXKC-DJsceloAq/exec";
 
 // ─── Estado inicial del formulario ────────────────────────────────────────────
 const FORM_INICIAL = {
@@ -84,6 +84,32 @@ export default function App() {
   
   // Modo Edición (Visual)
   const [isEditing, setIsEditing] = useState(false);
+  
+  // Gestión de Facturas y Referencias
+  const MONTHS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+  const currentYear = new Date().getFullYear();
+  const [selectedMonth, setSelectedMonth] = useState(MONTHS[new Date().getMonth()]);
+  const [selectedYear, setSelectedYear]   = useState(currentYear.toString());
+  const [nextRef, setNextRef]             = useState("...");
+  const [existingRefs, setExistingRefs]   = useState([]);
+  const [loadingRefs, setLoadingRefs]     = useState(false);
+  const [isUploading, setIsUploading]     = useState(false);
+  const [uploadStatus, setUploadStatus]   = useState(null);
+  const [previewUrl, setPreviewUrl]       = useState(null);
+  const [previewType, setPreviewType]     = useState(null);
+
+  // Administración: Colores y Trimestres
+  const [adminScan, setAdminScan]               = useState(null);
+  const [loadingAdmin, setLoadingAdmin]         = useState(false);
+  const [selectedAdminYear, setSelectedAdminYear] = useState(currentYear.toString());
+  const [colorAssignments, setColorAssignments] = useState({});
+  const [creatingStructure, setCreatingStructure] = useState(false);
+  const [createResult, setCreateResult]         = useState(null);
+
+  // Selector Mensual de Facturas Drive
+  const [monthFiles, setMonthFiles]             = useState([]);
+  const [loadingMonthFiles, setLoadingMonthFiles] = useState(false);
+  const [selectedAdminMonth, setSelectedAdminMonth] = useState(MONTHS[new Date().getMonth()]);
 
   // ── Tema ──────────────────────────────────────────────────────────────────
   const [darkMode, setDarkMode] = useState(() => {
@@ -97,16 +123,78 @@ export default function App() {
     localStorage.setItem("theme", darkMode ? "dark" : "light");
   }, [darkMode]);
 
-  // Cargar historial al cambiar a la pestaña
   useEffect(() => {
-    if (activeTab === "historial") {
-      fetchIncidencias();
-    }
-    // Si cambiamos a la pestaña de nuevo sin venir de un botón de edit, reseteamos modo edición
-    if (activeTab === "nuevo" && !isEditing) {
-      // Opcional: setForm(FORM_INICIAL); 
-    }
+    if (activeTab === "historial")      fetchIncidencias();
+    if (activeTab === "nuevo")         fetchNextRef(selectedMonth, selectedYear);
+    if (activeTab === "administracion") fetchScanStructure(selectedAdminYear);
   }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === "nuevo") fetchNextRef(selectedMonth, selectedYear);
+  }, [selectedMonth, selectedYear]);
+
+  const fetchNextRef = async (month, year) => {
+    setLoadingRefs(true);
+    try {
+      const params = month && year ? `&month=${month}&year=${year}` : '';
+      const resNext = await fetch(`${GOOGLE_SCRIPT_URL}?action=getNextRef${params}`);
+      const dataNext = await resNext.json();
+      if (dataNext.nextRef) setNextRef(dataNext.nextRef);
+
+      const resAll = await fetch(`${GOOGLE_SCRIPT_URL}?action=getAllRefs${params}`);
+      const dataAll = await resAll.json();
+      if (Array.isArray(dataAll.refs)) setExistingRefs(dataAll.refs);
+    } catch (error) {
+      console.error("Error al obtener referencias:", error);
+    } finally {
+      setLoadingRefs(false);
+    }
+  };
+
+  const fetchScanStructure = async (year) => {
+    setLoadingAdmin(true);
+    try {
+      const res  = await fetch(`${GOOGLE_SCRIPT_URL}?action=scanStructure&year=${year}`);
+      const data = await res.json();
+      setAdminScan(data);
+      setColorAssignments({});
+    } catch (err) {
+      console.error('Error escaneo Drive:', err);
+    } finally {
+      setLoadingAdmin(false);
+    }
+  };
+
+  const fetchMonthFiles = async (month, year) => {
+    setLoadingMonthFiles(true);
+    try {
+      const res  = await fetch(`${GOOGLE_SCRIPT_URL}?action=getMonthFiles&month=${month}&year=${year}`);
+      const data = await res.json();
+      setMonthFiles(Array.isArray(data.files) ? data.files : []);
+    } catch (err) {
+      console.error('Error al obtener archivos del mes:', err);
+    } finally {
+      setLoadingMonthFiles(false);
+    }
+  };
+
+  const handleCreateStructure = async () => {
+    if (Object.keys(colorAssignments).length === 0) return;
+    setCreatingStructure(true);
+    try {
+      await fetch(GOOGLE_SCRIPT_URL, {
+        method: 'POST',
+        mode: 'no-cors',
+        body: JSON.stringify({ action: 'createYearStructure', year: selectedAdminYear, colorAssignments })
+      });
+      setCreateResult({ success: true, msg: `Estructura ${selectedAdminYear} enviada a Drive.` });
+      setTimeout(() => fetchScanStructure(selectedAdminYear), 2000);
+    } catch (err) {
+      setCreateResult({ success: false, msg: 'Error: ' + err.message });
+    } finally {
+      setCreatingStructure(false);
+    }
+  };
 
   const fetchIncidencias = async () => {
     setLoadingHistory(true);
@@ -161,11 +249,67 @@ export default function App() {
     setForm(FORM_INICIAL);
     setIsEditing(false);
     setStatus({ type: "", msg: "" });
+    setPreviewUrl(null);
+    setPreviewType(null);
   };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
     setForm((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // Crear URL temporal para la vista previa
+    const fileUrl = URL.createObjectURL(file);
+    setPreviewUrl(fileUrl);
+    setPreviewType(file.type);
+
+    setIsUploading(true);
+    setUploadStatus({ type: 'info', msg: 'Subiendo factura y generando referencia...' });
+
+    try {
+      const currentNextRef = nextRef; // Guardamos la referencia que se le va a asignar
+      const reader = new FileReader();
+      
+      reader.onload = async (event) => {
+        try {
+          const base64 = event.target.result;
+          const payload = {
+            action: "uploadInvoice",
+            fileBase64: base64,
+            fileName: file.name
+          };
+
+          // POST a Apps Script con no-cors para evitar el bloqueo del navegador
+          await fetch(GOOGLE_SCRIPT_URL, {
+            method: "POST",
+            mode: "no-cors",
+            body: JSON.stringify(payload)
+          });
+
+          // Si llega aquí, asumimos éxito (no-cors no nos deja leer la respuesta json)
+          setForm(prev => ({ ...prev, ref: currentNextRef }));
+          
+          // Recargamos las referencias desde Drive para ver el nuevo archivo
+          await fetchNextRef(selectedMonth, selectedYear);
+
+          setUploadStatus({ type: 'success', msg: `✅ Factura subida: Ref ${currentNextRef}` });
+          setShowSuccess(true);
+          setTimeout(() => setShowSuccess(false), 3000);
+        } catch (postError) {
+          setUploadStatus({ type: 'error', msg: 'Error de red al subir la factura.' });
+        } finally {
+          setIsUploading(false);
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch (error) {
+      setUploadStatus({ type: 'error', msg: 'Error al procesar: ' + error.message });
+      setIsUploading(false);
+    }
   };
 
   const clasificacionFinal =
@@ -183,7 +327,7 @@ export default function App() {
     setStatus({ type: "info", msg: isEditing ? "Guardando cambios..." : "Enviando incidencia..." });
 
     const payload = {
-      "ref":                            form.ref,
+      "REF. FACTURA":                   form.ref,
       "PROPIEDAD":                      form.propiedad,
       "CLASIFICACION DE LA INCIDENCIA": clasificacionFinal,
       "DESCRIPCION DE LA INCIDENCIA":   form.descripcion,
@@ -279,6 +423,12 @@ export default function App() {
         >
           <ClipboardList size={18} /> Ver Historial
         </button>
+        <button
+          className={`tab-btn ${activeTab === "administracion" ? "active" : ""}`}
+          onClick={() => setActiveTab("administracion")}
+        >
+          <Wrench size={18} /> Administración
+        </button>
       </nav>
 
       {/* ── CONTENIDO DINÁMICO ─────────────────────── */}
@@ -293,8 +443,64 @@ export default function App() {
           >
             <div className="form-section-title">
               {isEditing ? <Pencil size={20} className="icon-accent" /> : <PlusCircle size={20} className="icon-accent" />}
-              <span>{isEditing ? "Modificando Incidencia Existente" : "Registrar Nueva Incidencia"}</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+                <span>{isEditing ? "Modificando Incidencia Existente" : "Registrar Nueva Incidencia"}</span>
+                {!isEditing && (
+                  <span className="ref-counter-badge">
+                    Próxima Ref: <strong>{nextRef}</strong>
+                  </span>
+                )}
+              </div>
             </div>
+
+            {/* ── SECCIÓN DE SUBIDA DE FACTURA ── */}
+            {!isEditing && (
+              <div className="upload-zone animate-fade-in">
+                <div className="upload-header">
+                  <Truck size={18} />
+                  <span>Carga de Factura (Auto-Ref)</span>
+                </div>
+                <div className="upload-content">
+                  <label htmlFor="invoice-upload" className={`upload-label ${isUploading ? 'uploading' : ''}`}>
+                    {isUploading ? <Loader2 size={24} className="spin" /> : <PlusCircle size={24} />}
+                    <div className="upload-text">
+                      <p>{isUploading ? "Procesando..." : "Haz clic o arrastra la factura"}</p>
+                      <small>Se asignará la referencia {nextRef} automáticamente</small>
+                    </div>
+                    <input 
+                      id="invoice-upload" 
+                      type="file" 
+                      accept=".pdf,image/*" 
+                      onChange={handleFileUpload} 
+                      disabled={isUploading}
+                      style={{ display: 'none' }}
+                    />
+                  </label>
+                  {uploadStatus && (
+                    <div className={`upload-status-mini ${uploadStatus.type}`}>
+                      {uploadStatus.msg}
+                    </div>
+                  )}
+                </div>
+
+                {/* ── VISTA PREVIA ── */}
+                {previewUrl && (
+                  <div className="preview-container animate-fade-in">
+                    <div className="preview-header">
+                      <span>Vista Previa del Documento</span>
+                      <button type="button" onClick={() => { setPreviewUrl(null); setPreviewType(null); }} className="close-preview">
+                        ✕
+                      </button>
+                    </div>
+                    {previewType && previewType.startsWith('image/') ? (
+                      <img src={previewUrl} alt="Vista previa de factura" className="preview-media" />
+                    ) : (
+                      <iframe src={previewUrl} title="Vista previa PDF" className="preview-media pdf-preview" />
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             <form onSubmit={handleSubmit} noValidate>
               <div className="form-grid">
@@ -315,12 +521,60 @@ export default function App() {
               </div>
 
               <div className="form-grid">
-                <div className="field-group">
-                  <label htmlFor="ref">
-                    <ClipboardList size={14} /> Ref. (Nº)
+                <div className="field-group ref-period-group">
+                  <label>
+                    <ClipboardList size={14} /> Ref. (Nº) — Buscar por periodo
                   </label>
-                  <input id="ref" name="ref" type="text"
-                    value={form.ref} onChange={handleChange} />
+
+                  {/* Selector de mes / año */}
+                  <div className="period-picker">
+                    <div className="select-wrap">
+                      <select
+                        id="refMonth"
+                        value={selectedMonth}
+                        onChange={e => setSelectedMonth(e.target.value)}
+                      >
+                        {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
+                      </select>
+                      <ChevronDown size={16} className="select-arrow" />
+                    </div>
+                    <div className="select-wrap">
+                      <select
+                        id="refYear"
+                        value={selectedYear}
+                        onChange={e => setSelectedYear(e.target.value)}
+                      >
+                        {[currentYear-1, currentYear, currentYear+1].map(y => (
+                          <option key={y} value={y.toString()}>{y}</option>
+                        ))}
+                      </select>
+                      <ChevronDown size={16} className="select-arrow" />
+                    </div>
+                    {loadingRefs && <Loader2 size={16} className="spin" style={{color:'var(--primary)'}} />}
+                  </div>
+
+                  {/* Desplegable de referencias */}
+                  <div className="select-wrap">
+                    <select id="ref" name="ref" value={form.ref} onChange={handleChange}>
+                      <option value="">— Seleccionar referencia —</option>
+                      {nextRef !== "..." && (
+                        <option value={nextRef}>⭐ Nueva: {nextRef} (siguiente disponible)</option>
+                      )}
+                      {existingRefs.length > 0 && (
+                        <optgroup label={`── ${selectedMonth} ${selectedYear} en Drive (${existingRefs.length}) ──`}>
+                          {existingRefs.map(item => (
+                            <option key={item.ref} value={item.ref}>
+                              {item.ref} — {item.fullName.replace(/\.pdf$/i,'').replace(/^\d+\s*[-.]?\s*/,'')}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                      {!loadingRefs && existingRefs.length === 0 && (
+                        <option disabled>Sin archivos en este periodo</option>
+                      )}
+                    </select>
+                    <ChevronDown size={18} className="select-arrow" />
+                  </div>
                 </div>
                 <div className="field-group">
                   <label htmlFor="propiedad">
@@ -492,6 +746,166 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* ── TAB ADMINISTRACIÓN ──────────────────── */}
+      {activeTab === "administracion" && (
+        <motion.div key="admin" className="glass-card form-card" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
+
+          {/* -- Escaneo de estructura -- */}
+          <div className="form-section-title">
+            <Wrench size={20} className="icon-accent" />
+            <span>Administración de Estructura Drive por Colores</span>
+          </div>
+
+          <div className="admin-toolbar">
+            <div className="select-wrap" style={{ maxWidth: 140 }}>
+              <select value={selectedAdminYear} onChange={e => { setSelectedAdminYear(e.target.value); setAdminScan(null); setMonthFiles([]); }}>
+                {[currentYear-1, currentYear, currentYear+1].map(y => <option key={y} value={y}>{y}</option>)}
+              </select>
+              <ChevronDown size={16} className="select-arrow" />
+            </div>
+            <button className="btn btn-secondary" onClick={() => fetchScanStructure(selectedAdminYear)} disabled={loadingAdmin}>
+              {loadingAdmin ? <Loader2 size={16} className="spin" /> : <Wrench size={16} />}
+              Escanear Drive
+            </button>
+          </div>
+
+          {/* Grid de disponibilidad de colores */}
+          {adminScan && (
+            <div className="admin-grid-wrap">
+              <h3 className="admin-section-title">Disponibilidad de Colores — {adminScan.year}</h3>
+              <div className="color-grid">
+                <div className="color-grid-header">Color</div>
+                {["Q1","Q2","Q3","Q4"].map(q => (
+                  <div key={q} className="color-grid-header">{["Ene-Feb-Mar","Abr-May-Jun","Jul-Ago-Sep","Oct-Nov-Dic"][["Q1","Q2","Q3","Q4"].indexOf(q)]}</div>
+                ))}
+                {adminScan.colorPalette.map(color => (
+                  <>
+                    <div key={color.id} className="color-cell color-label-cell">
+                      <span className="color-dot" style={{ background: color.hex }}></span>
+                      {color.label}
+                    </div>
+                    {["Q1","Q2","Q3","Q4"].map(q => {
+                      const used = adminScan.availability[q].used.includes(color.id);
+                      const folderInfo = adminScan.structure[q].find(f => f.matchesYear && f.color === color.id);
+                      return (
+                        <div key={q} className={`color-cell ${used ? 'cell-used' : 'cell-free'}`}>
+                          {used ? (
+                            <span title={folderInfo?.name || 'Ocupado'}>✓ Ocupado</span>
+                          ) : (
+                            <>
+                              <span>— Libre</span>
+                              <input
+                                type="checkbox"
+                                className="cell-checkbox"
+                                checked={colorAssignments[q] === color.id}
+                                onChange={e => setColorAssignments(prev => e.target.checked ? { ...prev, [q]: color.id } : Object.fromEntries(Object.entries(prev).filter(([k]) => k !== q || prev[k] !== color.id)))}
+                              />
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </>
+                ))}
+              </div>
+
+              {Object.keys(colorAssignments).length > 0 && (
+                <div className="admin-create-bar">
+                  <p>Crear carpetas seleccionadas para <strong>{selectedAdminYear}</strong>:</p>
+                  {["Q1","Q2","Q3","Q4"].filter(q => colorAssignments[q]).map(q => (
+                    <span key={q} className="create-badge">
+                      <span className="color-dot" style={{ background: adminScan.colorPalette.find(c=>c.id===colorAssignments[q])?.hex }}></span>
+                      {["Q1 → Ene-Mar","Q2 → Abr-Jun","Q3 → Jul-Sep","Q4 → Oct-Dic"][["Q1","Q2","Q3","Q4"].indexOf(q)]}
+                    </span>
+                  ))}
+                  <button className="btn btn-primary" onClick={handleCreateStructure} disabled={creatingStructure}>
+                    {creatingStructure ? <Loader2 size={16} className="spin" /> : <PlusCircle size={16} />}
+                    Crear Estructura en Drive
+                  </button>
+                  {createResult && (
+                    <span className={`upload-status-mini ${createResult.success ? 'success' : 'error'}`}>{createResult.msg}</span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Selector Mensual de Facturas */}
+          <div className="form-section-title" style={{ marginTop: '2rem' }}>
+            <FileText size={20} className="icon-accent" />
+            <span>Selector de Facturas por Mes</span>
+          </div>
+          <div className="admin-toolbar">
+            <div className="select-wrap">
+              <select value={selectedAdminMonth} onChange={e => setSelectedAdminMonth(e.target.value)}>
+                {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+              <ChevronDown size={16} className="select-arrow" />
+            </div>
+            <div className="select-wrap" style={{ maxWidth: 140 }}>
+              <select value={selectedAdminYear} onChange={e => setSelectedAdminYear(e.target.value)}>
+                {[currentYear-1, currentYear, currentYear+1].map(y => <option key={y} value={y}>{y}</option>)}
+              </select>
+              <ChevronDown size={16} className="select-arrow" />
+            </div>
+            <button className="btn btn-secondary" onClick={() => fetchMonthFiles(selectedAdminMonth, selectedAdminYear)} disabled={loadingMonthFiles}>
+              {loadingMonthFiles ? <Loader2 size={16} className="spin" /> : <FileText size={16} />}
+              Buscar Facturas
+            </button>
+          </div>
+
+          {monthFiles.length > 0 && (
+            <div className="month-files-table-wrap">
+              <table className="month-files-table">
+                <thead>
+                  <tr>
+                    <th>REF</th>
+                    <th>Nombre Archivo</th>
+                    <th>Cliente / Descripción</th>
+                    <th>Carpeta (Color)</th>
+                    <th>Acción</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {monthFiles.map((file, i) => (
+                    <tr key={i}>
+                      <td><span className="ref-badge">{file.ref}</span></td>
+                      <td className="file-name-cell">{file.fullName}</td>
+                      <td>{file.clientName}</td>
+                      <td>
+                        <span className="color-dot" style={{ background: file.colorHex }}></span>
+                        {file.colorLabel}
+                      </td>
+                      <td>
+                        <button
+                          className="btn btn-secondary"
+                          style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem' }}
+                          onClick={() => {
+                            setForm(prev => ({ ...prev, ref: file.ref }));
+                            setActiveTab('nuevo');
+                          }}
+                        >
+                          Usar REF
+                        </button>
+                        <a href={file.fileUrl} target="_blank" rel="noreferrer"
+                          className="btn btn-secondary"
+                          style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem', marginLeft: '0.4rem' }}
+                        >
+                          Ver ↗
+                        </a>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {!loadingMonthFiles && monthFiles.length === 0 && (
+            <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '1.5rem 0' }}>Sin archivos. Pulsa "Buscar Facturas" para consultar Drive.</p>
+          )}
+        </motion.div>
+      )}
     </div>
   );
 }
