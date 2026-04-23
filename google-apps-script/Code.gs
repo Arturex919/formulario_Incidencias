@@ -274,23 +274,18 @@ function getOrCreateSubFolder(parent, name) {
 }
 
 function getNextInvoiceRef(month, year) {
-  const files = getTargetFolder(month, year).getFiles();
+  const files = getMonthFiles(month, year);
   let max = 0;
-  while (files.hasNext()) {
-    const m = files.next().getName().match(/(\d{3})/);
-    if (m && parseInt(m[1]) > max) max = parseInt(m[1]);
-  }
+  files.forEach(f => {
+    if (f.ref && !isNaN(f.ref)) {
+      const num = parseInt(f.ref);
+      if (num > max) max = num;
+    }
+  });
   return max + 1;
 }
 
 function getAllInvoiceRefs(month, year) {
-  const files   = getTargetFolder(month, year).getFiles();
-  const results = [];
-  while (files.hasNext()) {
-    const file = files.next();
-    const name = file.getName();
-    const m    = name.match(/(\d{3})/);
-    if (m) results.push({ ref: m[1], fullName: name });
-  }
-  return results.sort((a, b) => parseInt(b.ref) - parseInt(a.ref));
+  // Ahora leemos de la nueva estructura de colores/trimestres
+  return getMonthFiles(month, year);
 }
