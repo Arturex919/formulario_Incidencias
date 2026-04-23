@@ -18,7 +18,7 @@ const CLASIFICACIONES = [
 
 const ESTADOS_INICIALES = ["PENDIENTE", "RESUELTA"];
 
-const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxqOHyHvU_QuNv8R_ZDi4PZ02JhnTAUq7LDN-h84OWDmkayFwsS3zDBlG2_JZoex3Vn/exec";
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbykR9VtRTZ0mI4boRurq4NhEueW_T3pFeMPgVXZsuqWBCiElzwDPgaKk1_QAHzZ9bw5/exec";
 
 // ─── Estado inicial del formulario ────────────────────────────────────────────
 const FORM_INICIAL = {
@@ -142,13 +142,17 @@ export default function App() {
       const params = month && year ? `&month=${month}&year=${year}` : '';
       const resNext = await fetch(`${GOOGLE_SCRIPT_URL}?action=getNextRef${params}`);
       const dataNext = await resNext.json();
-      if (dataNext.nextRef) setNextRef(dataNext.nextRef);
+      // FORZAR STRING para evitar notación científica
+      if (dataNext.nextRef) setNextRef(String(dataNext.nextRef));
 
       const resAll = await fetch(`${GOOGLE_SCRIPT_URL}?action=getAllRefs${params}`);
       const dataAll = await resAll.json();
-      // La API devuelve la lista completa de archivos con fullName
-      if (Array.isArray(dataAll.refs)) setExistingRefs(dataAll.refs);
-      else setExistingRefs([]);
+      if (Array.isArray(dataAll.refs)) {
+        // Forzar ref como string en cada item
+        setExistingRefs(dataAll.refs.map(item => ({ ...item, ref: String(item.ref) })));
+      } else {
+        setExistingRefs([]);
+      }
     } catch (error) {
       console.error("Error al obtener referencias:", error);
       setExistingRefs([]);
@@ -289,10 +293,9 @@ export default function App() {
     setUploadStatus({ type: 'info', msg: 'Subiendo factura y generando referencia...' });
 
     try {
-      const currentNextRef = nextRef; // Referencia que se asignará
-      // Nombre final: [nombre original sin extensión] [ref].[extensión]
+      const currentNextRef = String(nextRef); // SIEMPRE STRING
       const ext = file.name.includes('.') ? file.name.split('.').pop() : 'pdf';
-      const baseName = file.name.replace(/\.[^.]+$/, ''); // Sin extensión
+      const baseName = file.name.replace(/\.[^.]+$/, '');
       const finalFileName = `${baseName} ${currentNextRef}.${ext}`;
 
       const reader = new FileReader();
@@ -303,9 +306,9 @@ export default function App() {
           const payload = {
             action: "uploadInvoice",
             fileBase64: base64,
-            fileName: file.name,       // nombre original → backend construye [nombre] [ref].[ext]
-            refNumber: currentNextRef, // referencia a concatenar
-            month: selectedMonth,      // mes para encontrar la carpeta trimestral correcta
+            fileName: file.name,
+            refNumber: String(currentNextRef), // FORZAR STRING para evitar float
+            month: selectedMonth,
             year:  selectedYear
           };
 
@@ -460,7 +463,9 @@ export default function App() {
 
       {/* ── CONTENIDO DINÁMICO ─────────────────────── */}
       <AnimatePresence mode="wait">
-        {activeTab === "nuevo" ? (
+
+        {/* ── TAB: NUEVO REPORTE ── */}
+        {activeTab === "nuevo" && (
           <motion.div
             key="form"
             className="glass-card form-card"
@@ -732,9 +737,11 @@ export default function App() {
               </div>
             </form>
           </motion.div>
-        ) : activeTab === "historial" ? (
-          /* HISTORIAL */
-          <motion.div key="history" className="history-list" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
+        )}
+
+        {/* ── TAB: HISTORIAL ── */}
+        {activeTab === "historial" && (
+          <motion.div key="history" className="history-list" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
             {loadingHistory ? (
               <div className="glass-card" style={{ textAlign: 'center', padding: '4rem' }}>
                 <Loader2 size={40} className="spin icon-accent" />
@@ -788,9 +795,11 @@ export default function App() {
               ))
             )}
           </motion.div>
-        ) : (
-          /* ADMINISTRACIÓN — dentro del AnimatePresence para evitar pantalla en blanco */
-          <motion.div key="admin" className="glass-card form-card" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
+        )}
+
+        {/* ── TAB: ADMINISTRACIÓN ── */}
+        {activeTab === "administracion" && (
+          <motion.div key="admin" className="glass-card form-card" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
 
           {/* -- Escaneo de estructura -- */}
           <div className="form-section-title">
@@ -828,8 +837,8 @@ export default function App() {
                   <div key={q} className="color-grid-header">{["Ene-Feb-Mar","Abr-May-Jun","Jul-Ago-Sep","Oct-Nov-Dic"][["Q1","Q2","Q3","Q4"].indexOf(q)]}</div>
                 ))}
                 {adminScan.colorPalette.map(color => (
-                  <>
-                    <div key={color.id} className="color-cell color-label-cell">
+                  <React.Fragment key={color.id}>
+                    <div className="color-cell color-label-cell">
                       <span className="color-dot" style={{ background: color.hex }}></span>
                       {color.label}
                     </div>
@@ -854,7 +863,7 @@ export default function App() {
                         </div>
                       );
                     })}
-                  </>
+                  </React.Fragment>
                 ))}
               </div>
 
@@ -952,8 +961,9 @@ export default function App() {
           {!loadingMonthFiles && monthFiles.length === 0 && (
             <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '1.5rem 0' }}>Sin archivos. Pulsa "Buscar Facturas" para consultar Drive.</p>
           )}
-        </motion.div>
+          </motion.div>
         )}
+
       </AnimatePresence>
     </div>
   );
