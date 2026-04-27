@@ -100,6 +100,44 @@ export default function App() {
   // Nombre del archivo seleccionado para el campo REF
   const [selectedRefFileName, setSelectedRefFileName] = useState("");
 
+  // Propiedades desde Google Sheet (sin Apps Script)
+  const [propiedadesLocales, setPropiedadesLocales] = useState([]);
+  const [loadingPropiedades, setLoadingPropiedades] = useState(false);
+
+  useEffect(() => {
+    const fetchPropiedades = async () => {
+      setLoadingPropiedades(true);
+      try {
+        const url = "https://docs.google.com/spreadsheets/d/1Z1qYQ2ykQG2Kq1hO9K2PdjES_OvOR2d1yKPv7MdyAa4/gviz/tq?tqx=out:json&sheet=ALOJAMIENTOS%20ACTIVOS";
+        const res = await fetch(url);
+        const text = await res.text();
+        const jsonString = text.substring(text.indexOf('{'), text.lastIndexOf('}') + 1);
+        const data = JSON.parse(jsonString);
+        
+        const props = [];
+        if (data && data.table && data.table.rows) {
+          data.table.rows.forEach(row => {
+            if (row.c && row.c[0] && row.c[0].v) {
+              const propName = row.c[0].v;
+              let ref = '';
+              if (row.c[1]) {
+                if (row.c[1].f) ref = row.c[1].f;
+                else if (row.c[1].v) ref = String(row.c[1].v);
+              }
+              props.push({ name: propName, ref: ref });
+            }
+          });
+        }
+        setPropiedadesLocales(props);
+      } catch (e) {
+        console.error("Error cargando propiedades:", e);
+      } finally {
+        setLoadingPropiedades(false);
+      }
+    };
+    fetchPropiedades();
+  }, []);
+
   // Administración: Colores y Trimestres
   const [adminScan, setAdminScan]               = useState(null);
   const [adminError, setAdminError]             = useState(null);
@@ -652,8 +690,27 @@ export default function App() {
                   <label htmlFor="propiedad">
                     <Home size={14} /> Propiedad <span className="req">*</span>
                   </label>
-                  <input id="propiedad" name="propiedad" type="text"
-                    value={form.propiedad} onChange={handleChange} required />
+                  <div className="select-wrap">
+                    <select
+                      id="propiedad"
+                      name="propiedad"
+                      value={form.propiedad}
+                      onChange={handleChange}
+                      required
+                    >
+                      <option value="">— Seleccionar Propiedad —</option>
+                      {loadingPropiedades ? (
+                        <option value="" disabled>Cargando propiedades...</option>
+                      ) : (
+                        propiedadesLocales.map((p, i) => (
+                          <option key={i} value={p.name}>
+                            {p.ref ? `[${p.ref}] ` : ''}{p.name}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                    <ChevronDown size={18} className="select-arrow" />
+                  </div>
                 </div>
               </div>
 
