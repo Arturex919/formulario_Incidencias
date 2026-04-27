@@ -267,8 +267,18 @@ function getMonthFiles(month, year) {
 
   // Buscar subcarpeta del mes
   const monthUpper = month.toUpperCase();
-  const subIt      = quarterFolder.getFoldersByName(monthUpper);
-  const fileSource = subIt.hasNext() ? subIt.next() : quarterFolder;
+  const it1 = quarterFolder.getFoldersByName(monthUpper);
+  let fileSource = null;
+  if (it1.hasNext()) {
+    fileSource = it1.next();
+  } else {
+    const it2 = quarterFolder.getFoldersByName(month);
+    if (it2.hasNext()) {
+      fileSource = it2.next();
+    }
+  }
+  
+  if (!fileSource) return [];
 
   const colorHex  = getFolderColorById(quarterFolder.getId());
   const colorInfo = matchColorToPalette(colorHex);
