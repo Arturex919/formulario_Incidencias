@@ -18,7 +18,7 @@ const CLASIFICACIONES = [
 
 const ESTADOS_INICIALES = ["PENDIENTE", "RESUELTA"];
 
-const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz8Um6I2jVvrG-07Oz7KHwtWLB7NNn6uKbzIQXc-XAu55OgJUurN5gL51NC5mv8N8xs/exec";
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx5GLuQbIEPak16uBdguej4ExQCKSg6cq05j7vRMhQTTUCMJVmrmZ0DKUcNmSsZ4Ppp/exec";
 
 // ─── Estado inicial del formulario ────────────────────────────────────────────
 const FORM_INICIAL = {
@@ -44,10 +44,10 @@ const formatearFecha = (fechaStr) => {
   try {
     const fecha = new Date(fechaStr);
     if (isNaN(fecha.getTime())) return fechaStr; // Retornar tal cual si falla el parseo
-    return new Intl.DateTimeFormat('es-ES', { 
-      day: '2-digit', 
-      month: 'long', 
-      year: 'numeric' 
+    return new Intl.DateTimeFormat('es-ES', {
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric'
     }).format(fecha);
   } catch (e) {
     return fechaStr;
@@ -59,7 +59,7 @@ const normalizarFechaParaInput = (fechaRaw) => {
   try {
     const d = new Date(fechaRaw);
     if (isNaN(d.getTime())) return new Date().toISOString().split("T")[0];
-    
+
     // Usar componentes locales para evitar desfases de zona horaria
     const year = d.getFullYear();
     const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -72,31 +72,31 @@ const normalizarFechaParaInput = (fechaRaw) => {
 
 // ─── Componente principal ──────────────────────────────────────────────────────
 export default function App() {
-  const [form, setForm]               = useState(FORM_INICIAL);
-  const [loading, setLoading]       = useState(false);
-  const [status, setStatus]         = useState({ type: "", msg: "" });
+  const [form, setForm] = useState(FORM_INICIAL);
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState({ type: "", msg: "" });
   const [showSuccess, setShowSuccess] = useState(false);
-  
+
   // Pestañas e Historial
-  const [activeTab, setActiveTab] = useState("nuevo"); 
+  const [activeTab, setActiveTab] = useState("nuevo");
   const [incidencias, setIncidencias] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
-  
+
   // Modo Edición (Visual)
   const [isEditing, setIsEditing] = useState(false);
-  
+
   // Gestión de Facturas y Referencias
-  const MONTHS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+  const MONTHS = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
   const currentYear = new Date().getFullYear();
   const [selectedMonth, setSelectedMonth] = useState(MONTHS[new Date().getMonth()]);
-  const [selectedYear, setSelectedYear]   = useState(currentYear.toString());
-  const [nextRef, setNextRef]             = useState("...");
-  const [existingRefs, setExistingRefs]   = useState([]);
-  const [loadingRefs, setLoadingRefs]     = useState(false);
-  const [isUploading, setIsUploading]     = useState(false);
-  const [uploadStatus, setUploadStatus]   = useState(null);
-  const [previewUrl, setPreviewUrl]       = useState(null);
-  const [previewType, setPreviewType]     = useState(null);
+  const [selectedYear, setSelectedYear] = useState(currentYear.toString());
+  const [nextRef, setNextRef] = useState("...");
+  const [existingRefs, setExistingRefs] = useState([]);
+  const [loadingRefs, setLoadingRefs] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [previewType, setPreviewType] = useState(null);
   // Nombre del archivo seleccionado para el campo REF
   const [selectedRefFileName, setSelectedRefFileName] = useState("");
 
@@ -113,7 +113,7 @@ export default function App() {
         const text = await res.text();
         const jsonString = text.substring(text.indexOf('{'), text.lastIndexOf('}') + 1);
         const data = JSON.parse(jsonString);
-        
+
         const props = [];
         if (data && data.table && data.table.rows) {
           data.table.rows.forEach(row => {
@@ -139,16 +139,16 @@ export default function App() {
   }, []);
 
   // Administración: Colores y Trimestres
-  const [adminScan, setAdminScan]               = useState(null);
-  const [adminError, setAdminError]             = useState(null);
-  const [loadingAdmin, setLoadingAdmin]         = useState(false);
+  const [adminScan, setAdminScan] = useState(null);
+  const [adminError, setAdminError] = useState(null);
+  const [loadingAdmin, setLoadingAdmin] = useState(false);
   const [selectedAdminYear, setSelectedAdminYear] = useState(currentYear.toString());
   const [colorAssignments, setColorAssignments] = useState({});
   const [creatingStructure, setCreatingStructure] = useState(false);
-  const [createResult, setCreateResult]         = useState(null);
+  const [createResult, setCreateResult] = useState(null);
 
   // Selector Mensual de Facturas Drive
-  const [monthFiles, setMonthFiles]             = useState([]);
+  const [monthFiles, setMonthFiles] = useState([]);
   const [loadingMonthFiles, setLoadingMonthFiles] = useState(false);
   const [selectedAdminMonth, setSelectedAdminMonth] = useState(MONTHS[new Date().getMonth()]);
 
@@ -165,8 +165,8 @@ export default function App() {
   }, [darkMode]);
 
   useEffect(() => {
-    if (activeTab === "historial")      fetchIncidencias();
-    if (activeTab === "nuevo")         fetchNextRef(selectedMonth, selectedYear);
+    if (activeTab === "historial") fetchIncidencias();
+    if (activeTab === "nuevo") fetchNextRef(selectedMonth, selectedYear);
     if (activeTab === "administracion") fetchScanStructure(selectedAdminYear);
   }, [activeTab]);
 
@@ -177,7 +177,7 @@ export default function App() {
   const fetchNextRef = async (month, year) => {
     setLoadingRefs(true);
     try {
-      const params = month && year ? `&month=${month}&year=${year}` : '';
+      const params = month && year ? `&month=${month}&year=${year}&_t=${Date.now()}` : `&_t=${Date.now()}`;
       const resNext = await fetch(`${GOOGLE_SCRIPT_URL}?action=getNextRef${params}`);
       const dataNext = await resNext.json();
       // FORZAR STRING para evitar notación científica
@@ -203,7 +203,7 @@ export default function App() {
     setLoadingAdmin(true);
     setAdminError(null);
     try {
-      const res  = await fetch(`${GOOGLE_SCRIPT_URL}?action=scanStructure&year=${year}`);
+      const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=scanStructure&year=${year}`);
       const data = await res.json();
       if (data && data.error) {
         setAdminError(data.error);
@@ -228,7 +228,7 @@ export default function App() {
   const fetchMonthFiles = async (month, year) => {
     setLoadingMonthFiles(true);
     try {
-      const res  = await fetch(`${GOOGLE_SCRIPT_URL}?action=getMonthFiles&month=${month}&year=${year}`);
+      const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getMonthFiles&month=${month}&year=${year}`);
       const data = await res.json();
       setMonthFiles(Array.isArray(data.files) ? data.files : []);
     } catch (err) {
@@ -258,13 +258,13 @@ export default function App() {
   };
 
   const [ensuringMonths, setEnsuringMonths] = useState(false);
-  const [ensureResult, setEnsureResult]     = useState(null);
+  const [ensureResult, setEnsureResult] = useState(null);
 
   const handleEnsureMonths = async () => {
     setEnsuringMonths(true);
     setEnsureResult(null);
     try {
-      const res  = await fetch(`${GOOGLE_SCRIPT_URL}?action=ensureMonths&year=${selectedAdminYear}`);
+      const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=ensureMonths&year=${selectedAdminYear}`);
       const data = await res.json();
       if (data.success) {
         const summary = data.results.map(r => `${r.quarter}: ${r.status}`).join(' | ');
@@ -290,7 +290,7 @@ export default function App() {
           const dateB = new Date(b["FECHA"] || b["FECHA REPORTE INCIDENCIA"]);
           return dateB - dateA;
         });
-        setIncidencias(sortedData); 
+        setIncidencias(sortedData);
       }
     } catch (error) {
       console.error("Error al cargar historial:", error);
@@ -303,23 +303,23 @@ export default function App() {
     // Mapear campos de Excel a campos de Formulario
     const dataToEdit = {
       responsable: inc["RESPONSABLE DEL REPORTE"] || "",
-      fecha:       normalizarFechaParaInput(inc["FECHA"] || inc["FECHA REPORTE INCIDENCIA"]),
-      ref:         inc["ref"] || "",
-      propiedad:   inc["PROPIEDAD"] || "",
-      clasificacion: CLASIFICACIONES.includes(inc["CLASIFICACION DE LA INCIDENCIA"]) 
-                     ? inc["CLASIFICACION DE LA INCIDENCIA"] 
-                     : "OTRO",
+      fecha: normalizarFechaParaInput(inc["FECHA"] || inc["FECHA REPORTE INCIDENCIA"]),
+      ref: inc["ref"] || "",
+      propiedad: inc["PROPIEDAD"] || "",
+      clasificacion: CLASIFICACIONES.includes(inc["CLASIFICACION DE LA INCIDENCIA"])
+        ? inc["CLASIFICACION DE LA INCIDENCIA"]
+        : "OTRO",
       clasificacionOtro: CLASIFICACIONES.includes(inc["CLASIFICACION DE LA INCIDENCIA"])
-                         ? ""
-                         : inc["CLASIFICACION DE LA INCIDENCIA"] || "",
+        ? ""
+        : inc["CLASIFICACION DE LA INCIDENCIA"] || "",
       descripcion: inc["DESCRIPCION DE LA INCIDENCIA"] || "",
-      operario:    inc["OPERARIO"] || "",
-      proveedor:   inc["PROVEEDOR"] || "",
+      operario: inc["OPERARIO"] || "",
+      proveedor: inc["PROVEEDOR"] || "",
       costoManoObra: inc["costo mano obra"] || "",
       accionTomada: inc["ACCION TOMADA"] || "",
-      planAccion:   inc["PLAN DE ACCION"] || "",
-      estado:       inc["ESTADO"] || "PENDIENTE",
-      rowIndex:     inc.rowIndex,
+      planAccion: inc["PLAN DE ACCION"] || "",
+      estado: inc["ESTADO"] || "PENDIENTE",
+      rowIndex: inc.rowIndex,
     };
 
     setForm(dataToEdit);
@@ -360,7 +360,7 @@ export default function App() {
       const finalFileName = `${baseName} ${currentNextRef}.${ext}`;
 
       const reader = new FileReader();
-      
+
       reader.onload = async (event) => {
         try {
           const base64 = event.target.result;
@@ -370,7 +370,7 @@ export default function App() {
             fileName: file.name,
             refNumber: String(currentNextRef), // FORZAR STRING para evitar float
             month: selectedMonth,
-            year:  selectedYear
+            year: selectedYear
           };
 
           // POST a Apps Script con no-cors para evitar el bloqueo del navegador
@@ -383,7 +383,7 @@ export default function App() {
           // Asumimos éxito (no-cors no nos deja leer la respuesta json)
           setForm(prev => ({ ...prev, ref: currentNextRef }));
           setSelectedRefFileName(finalFileName);
-          
+
           // Recargamos las referencias desde Drive
           await fetchNextRef(selectedMonth, selectedYear);
 
@@ -418,32 +418,32 @@ export default function App() {
     setStatus({ type: "info", msg: isEditing ? "Guardando cambios..." : "Enviando incidencia..." });
 
     const payload = {
-      "REF. FACTURA":                   form.ref,
-      "PROPIEDAD":                      form.propiedad,
+      "REF. FACTURA": form.ref,
+      "PROPIEDAD": form.propiedad,
       "CLASIFICACION DE LA INCIDENCIA": clasificacionFinal,
-      "DESCRIPCION DE LA INCIDENCIA":   form.descripcion,
-      "OPERARIO":                       form.operario,
-      "PROVEEDOR":                      form.proveedor,
-      "ESTADO":                         form.estado,
-      "ACCION TOMADA":                  form.accionTomada,
-      "PLAN DE ACCION":                 form.planAccion,
-      "FECHA":                          form.fecha,
-      "FECHA REPORTE INCIDENCIA":       form.fecha,
-      "costo mano obra":                form.costoManoObra,
-      "RESPONSABLE DEL REPORTE":        form.responsable,
-      "rowIndex":                       form.rowIndex,
+      "DESCRIPCION DE LA INCIDENCIA": form.descripcion,
+      "OPERARIO": form.operario,
+      "PROVEEDOR": form.proveedor,
+      "ESTADO": form.estado,
+      "ACCION TOMADA": form.accionTomada,
+      "PLAN DE ACCION": form.planAccion,
+      "FECHA": form.fecha,
+      "FECHA REPORTE INCIDENCIA": form.fecha,
+      "costo mano obra": form.costoManoObra,
+      "RESPONSABLE DEL REPORTE": form.responsable,
+      "rowIndex": form.rowIndex,
     };
 
     try {
       await fetch(GOOGLE_SCRIPT_URL, {
         method: "POST",
-        mode: "no-cors", 
+        mode: "no-cors",
         body: JSON.stringify(payload),
       });
 
-      setStatus({ 
-        type: "success", 
-        msg: isEditing ? "¡Incidencia actualizada correctamente!" : "¡Tu reporte ha sido procesado correctamente!" 
+      setStatus({
+        type: "success",
+        msg: isEditing ? "¡Incidencia actualizada correctamente!" : "¡Tu reporte ha sido procesado correctamente!"
       });
       setShowSuccess(true);
       resetForm();
@@ -501,14 +501,14 @@ export default function App() {
 
       {/* ── TABS NAVEGACIÓN ────────────────────────── */}
       <nav className="tabs-container animate-fade-in" style={{ animationDelay: '0.1s' }}>
-        <button 
+        <button
           className={`tab-btn ${activeTab === "nuevo" ? "active" : ""}`}
-          onClick={() => { setActiveTab("nuevo"); if(!isEditing) resetForm(); }}
+          onClick={() => { setActiveTab("nuevo"); if (!isEditing) resetForm(); }}
         >
-          {isEditing ? <Pencil size={18} /> : <PlusCircle size={18} />} 
+          {isEditing ? <Pencil size={18} /> : <PlusCircle size={18} />}
           {isEditing ? "Editando" : "Nuevo Reporte"}
         </button>
-        <button 
+        <button
           className={`tab-btn ${activeTab === "historial" ? "active" : ""}`}
           onClick={() => setActiveTab("historial")}
         >
@@ -560,11 +560,11 @@ export default function App() {
                       <p>{isUploading ? "Procesando..." : "Haz clic o arrastra la factura"}</p>
                       <small>Se asignará la referencia {nextRef} automáticamente</small>
                     </div>
-                    <input 
-                      id="invoice-upload" 
-                      type="file" 
-                      accept=".pdf,image/*" 
-                      onChange={handleFileUpload} 
+                    <input
+                      id="invoice-upload"
+                      type="file"
+                      accept=".pdf,image/*"
+                      onChange={handleFileUpload}
                       disabled={isUploading}
                       style={{ display: 'none' }}
                     />
@@ -637,13 +637,13 @@ export default function App() {
                         value={selectedYear}
                         onChange={e => setSelectedYear(e.target.value)}
                       >
-                        {[currentYear-1, currentYear, currentYear+1].map(y => (
+                        {[currentYear - 2, currentYear - 1, currentYear, currentYear + 1, currentYear + 2].map(y => (
                           <option key={y} value={y.toString()}>{y}</option>
                         ))}
                       </select>
                       <ChevronDown size={16} className="select-arrow" />
                     </div>
-                    {loadingRefs && <Loader2 size={16} className="spin" style={{color:'var(--primary)'}} />}
+                    {loadingRefs && <Loader2 size={16} className="spin" style={{ color: 'var(--primary)' }} />}
                   </div>
 
                   {/* Desplegable de referencias — muestra el nombre original del archivo */}
@@ -881,113 +881,92 @@ export default function App() {
         {activeTab === "administracion" && (
           <motion.div key="admin" className="glass-card form-card" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
 
-          {/* -- Escaneo de estructura -- */}
-          <div className="form-section-title">
-            <Wrench size={20} className="icon-accent" />
-            <span>Administración de Estructura Drive por Colores</span>
-          </div>
-
-          <div className="admin-toolbar">
-            <div className="select-wrap" style={{ maxWidth: 140 }}>
-              <select value={selectedAdminYear} onChange={e => { setSelectedAdminYear(e.target.value); setAdminScan(null); setMonthFiles([]); }}>
-                {[currentYear-1, currentYear, currentYear+1].map(y => <option key={y} value={y}>{y}</option>)}
-              </select>
-              <ChevronDown size={16} className="select-arrow" />
+            {/* -- Escaneo de estructura -- */}
+            <div className="form-section-title">
+              <Wrench size={20} className="icon-accent" />
+              <span>Administración de Estructura Drive por Colores</span>
             </div>
-            <button className="btn btn-secondary" onClick={() => fetchScanStructure(selectedAdminYear)} disabled={loadingAdmin}>
-              {loadingAdmin ? <Loader2 size={16} className="spin" /> : <Wrench size={16} />}
-              Escanear Drive
-            </button>
-          </div>
 
-          {/* Error de escaneo */}
-          {adminError && (
-            <div className="status-msg error" style={{ margin: '1rem 0' }}>
-              ⚠️ {adminError}
-            </div>
-          )}
-
-          {/* Grid de disponibilidad de colores */}
-          {adminScan && !adminError && (
-            <div className="admin-grid-wrap">
-              <h3 className="admin-section-title">Disponibilidad de Colores — {adminScan.year}</h3>
-              <div className="color-grid">
-                <div className="color-grid-header">Color</div>
-                {["Q1","Q2","Q3","Q4"].map(q => (
-                  <div key={q} className="color-grid-header">{["Ene-Feb-Mar","Abr-May-Jun","Jul-Ago-Sep","Oct-Nov-Dic"][["Q1","Q2","Q3","Q4"].indexOf(q)]}</div>
-                ))}
-                {adminScan.colorPalette.map(color => (
-                  <React.Fragment key={color.id}>
-                    <div className="color-cell color-label-cell">
-                      <span className="color-dot" style={{ background: color.hex }}></span>
-                      {color.label}
-                    </div>
-                    {["Q1","Q2","Q3","Q4"].map(q => {
-                      const used = adminScan.availability[q].used.includes(color.id);
-                      const folderInfo = adminScan.structure[q].find(f => f.matchesYear && f.color === color.id);
-                      return (
-                        <div key={q} className={`color-cell ${used ? 'cell-used' : 'cell-free'}`}>
-                          {used ? (
-                            <span title={folderInfo?.name || 'Ocupado'}>✓ Ocupado</span>
-                          ) : (
-                            <>
-                              <span>— Libre</span>
-                              <input
-                                type="checkbox"
-                                className="cell-checkbox"
-                                checked={colorAssignments[q] === color.id}
-                                onChange={e => setColorAssignments(prev => e.target.checked ? { ...prev, [q]: color.id } : Object.fromEntries(Object.entries(prev).filter(([k]) => k !== q || prev[k] !== color.id)))}
-                              />
-                            </>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </React.Fragment>
-                ))}
+            <div className="admin-toolbar">
+              <div className="select-wrap" style={{ maxWidth: 140 }}>
+                <select value={selectedAdminYear} onChange={e => { setSelectedAdminYear(e.target.value); setAdminScan(null); setMonthFiles([]); }}>
+                  {[currentYear - 2, currentYear - 1, currentYear, currentYear + 1, currentYear + 2].map(y => <option key={y} value={y}>{y}</option>)}
+                </select>
+                <ChevronDown size={16} className="select-arrow" />
               </div>
+              <button className="btn btn-secondary" onClick={() => fetchScanStructure(selectedAdminYear)} disabled={loadingAdmin}>
+                {loadingAdmin ? <Loader2 size={16} className="spin" /> : <Wrench size={16} />}
+                Escanear Drive
+              </button>
+            </div>
 
-              {Object.keys(colorAssignments).length > 0 && (
-                <div className="admin-create-bar">
-                  <p>Crear carpetas seleccionadas para <strong>{selectedAdminYear}</strong>:</p>
-                  {["Q1","Q2","Q3","Q4"].filter(q => colorAssignments[q]).map(q => (
-                    <span key={q} className="create-badge">
-                      <span className="color-dot" style={{ background: adminScan.colorPalette.find(c=>c.id===colorAssignments[q])?.hex }}></span>
-                      {["Q1 → Ene-Mar","Q2 → Abr-Jun","Q3 → Jul-Sep","Q4 → Oct-Dic"][["Q1","Q2","Q3","Q4"].indexOf(q)]}
-                    </span>
+            {/* Error de escaneo */}
+            {adminError && (
+              <div className="status-msg error" style={{ margin: '1rem 0' }}>
+                ⚠️ {adminError}
+              </div>
+            )}
+
+            {/* Grid de disponibilidad de colores */}
+            {adminScan && !adminError && (
+              <div className="admin-grid-wrap">
+                <h3 className="admin-section-title">Disponibilidad de Colores — {adminScan.year}</h3>
+                <div className="color-grid">
+                  <div className="color-grid-header">Color</div>
+                  {["Q1", "Q2", "Q3", "Q4"].map(q => (
+                    <div key={q} className="color-grid-header">{["Ene-Feb-Mar", "Abr-May-Jun", "Jul-Ago-Sep", "Oct-Nov-Dic"][["Q1", "Q2", "Q3", "Q4"].indexOf(q)]}</div>
                   ))}
-                  <button className="btn btn-primary" onClick={handleCreateStructure} disabled={creatingStructure}>
-                    {creatingStructure ? <Loader2 size={16} className="spin" /> : <PlusCircle size={16} />}
-                    Crear Estructura en Drive
-                  </button>
-                  {createResult && (
-                    <span className={`upload-status-mini ${createResult.success ? 'success' : 'error'}`}>{createResult.msg}</span>
-                  )}
+                  {adminScan.colorPalette.map(color => (
+                    <React.Fragment key={color.id}>
+                      <div className="color-cell color-label-cell">
+                        <span className="color-dot" style={{ background: color.hex }}></span>
+                        {color.label}
+                      </div>
+                      {["Q1", "Q2", "Q3", "Q4"].map(q => {
+                        const used = adminScan.availability[q].used.includes(color.id);
+                        const folderInfo = adminScan.structure[q].find(f => f.matchesYear && f.color === color.id);
+                        return (
+                          <div key={q} className={`color-cell ${used ? 'cell-used' : 'cell-free'}`}>
+                            {used ? (
+                              <span title={folderInfo?.name || 'Ocupado'}>✓ Ocupado</span>
+                            ) : (
+                              <>
+                                <span>— Libre</span>
+                                <input
+                                  type="checkbox"
+                                  className="cell-checkbox"
+                                  checked={colorAssignments[q] === color.id}
+                                  onChange={e => setColorAssignments(prev => e.target.checked ? { ...prev, [q]: color.id } : Object.fromEntries(Object.entries(prev).filter(([k]) => k !== q || prev[k] !== color.id)))}
+                                />
+                              </>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </React.Fragment>
+                  ))}
                 </div>
-              )}
-            </div>
-          )}
 
-          {/* ── BARRA: GARANTIZAR SUBCARPETAS DE MES ── */}
-          <div className="form-section-title" style={{ marginTop: '2rem' }}>
-            <FolderPlus size={20} className="icon-accent" />
-            <span>Verificar Subcarpetas de Meses</span>
-          </div>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', margin: '0 0 1rem' }}>
-            Crea automáticamente las subcarpetas de cada mes dentro de los trimestres del año seleccionado.
-            Úsalo si las carpetas trimestrales ya existen pero les faltan los meses.
-          </p>
-          <div className="admin-toolbar">
-            <button className="btn btn-secondary" onClick={handleEnsureMonths} disabled={ensuringMonths}>
-              {ensuringMonths ? <Loader2 size={16} className="spin" /> : <FolderPlus size={16} />}
-              Crear Meses en Trimestres ({selectedAdminYear})
-            </button>
-          </div>
-          {ensureResult && (
-            <div className={`status-msg ${ensureResult.success ? 'success' : 'error'}`} style={{ marginTop: '0.5rem' }}>
-              {ensureResult.msg}
-            </div>
-          )}
+                {Object.keys(colorAssignments).length > 0 && (
+                  <div className="admin-create-bar">
+                    <p>Crear carpetas seleccionadas para <strong>{selectedAdminYear}</strong>:</p>
+                    {["Q1", "Q2", "Q3", "Q4"].filter(q => colorAssignments[q]).map(q => (
+                      <span key={q} className="create-badge">
+                        <span className="color-dot" style={{ background: adminScan.colorPalette.find(c => c.id === colorAssignments[q])?.hex }}></span>
+                        {["Q1 → Ene-Mar", "Q2 → Abr-Jun", "Q3 → Jul-Sep", "Q4 → Oct-Dic"][["Q1", "Q2", "Q3", "Q4"].indexOf(q)]}
+                      </span>
+                    ))}
+                    <button className="btn btn-primary" onClick={handleCreateStructure} disabled={creatingStructure}>
+                      {creatingStructure ? <Loader2 size={16} className="spin" /> : <PlusCircle size={16} />}
+                      Crear Estructura en Drive
+                    </button>
+                    {createResult && (
+                      <span className={`upload-status-mini ${createResult.success ? 'success' : 'error'}`}>{createResult.msg}</span>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
           </motion.div>
         )}

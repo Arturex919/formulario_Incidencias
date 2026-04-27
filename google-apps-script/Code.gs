@@ -66,8 +66,15 @@ function matchColorToPalette(hexColor) {
 }
 
 function getOrCreate(parent, name) {
-  const it = parent.getFoldersByName(name);
-  return it.hasNext() ? it.next() : parent.createFolder(name);
+  const upperName = name.toUpperCase();
+  const folders = parent.getFolders();
+  while (folders.hasNext()) {
+    const folder = folders.next();
+    if (folder.getName().toUpperCase() === upperName) {
+      return folder;
+    }
+  }
+  return parent.createFolder(name);
 }
 
 // ── CLAVE: buscar carpeta trimestral FILTRANDO por año ───────────────────────
@@ -111,10 +118,14 @@ function findQuarterFolder(quarterKey, yearHint) {
 // ── Subcarpeta del MES dentro del trimestre ──────────────────────────────────
 function getMonthSubFolder(quarterFolder, monthName) {
   const upper = monthName.toUpperCase();
-  const it1 = quarterFolder.getFoldersByName(upper);
-  if (it1.hasNext()) return it1.next();
-  const it2 = quarterFolder.getFoldersByName(monthName);
-  if (it2.hasNext()) return it2.next();
+  const folders = quarterFolder.getFolders();
+  while (folders.hasNext()) {
+    const folder = folders.next();
+    const fname = folder.getName().toUpperCase();
+    if (fname === upper || fname === monthName.toUpperCase()) {
+      return folder;
+    }
+  }
   // No existe → crear
   return quarterFolder.createFolder(upper);
 }
@@ -267,14 +278,14 @@ function getMonthFiles(month, year) {
 
   // Buscar subcarpeta del mes
   const monthUpper = month.toUpperCase();
-  const it1 = quarterFolder.getFoldersByName(monthUpper);
+  const folders = quarterFolder.getFolders();
   let fileSource = null;
-  if (it1.hasNext()) {
-    fileSource = it1.next();
-  } else {
-    const it2 = quarterFolder.getFoldersByName(month);
-    if (it2.hasNext()) {
-      fileSource = it2.next();
+  while (folders.hasNext()) {
+    const folder = folders.next();
+    const fname = folder.getName().toUpperCase();
+    if (fname === monthUpper || fname === month.toUpperCase()) {
+      fileSource = folder;
+      break;
     }
   }
   
@@ -393,30 +404,48 @@ function createQuarterlyStructure(year, colorAssignments) {
     const cfg = QUARTER_CONFIG[quarter];
     if (!cfg) continue;
     const folderName = cfg.label + " " + year;
-    const existing   = root.getFoldersByName(folderName);
-
-    if (existing.hasNext()) {
-      const existId = existing.next().getId();
-      // Asegurarse de que existen subcarpetas de meses
-      const qFolder = DriveApp.getFolderById(existId);
-      cfg.monthNames.forEach(m => getOrCreate(qFolder, m));
-      created.push({ quarter, folderName, status: "ya existia", id: existId });
-      continue;
+    
+    let qFolder = null;
+    let statusMsg = "";
+    
+    const folders = root.getFolders();
+    while (folders.hasNext()) {
+      const f = folders.next();
+      if (f.getName() === folderName) {
+        qFolder = f;
+        statusMsg = "ya existia (color actualizado)";
+        break;
+      }
     }
 
-    const newFolder = root.createFolder(folderName);
-    // Crear subcarpetas de meses automáticamente
-    cfg.monthNames.forEach(m => newFolder.createFolder(m));
+    if (!qFolder) {
+      qFolder = root.createFolder(folderName);
+      // Crear subcarpetas de meses automáticamente solo si es nueva
+      cfg.monthNames.forEach(m => qFolder.createFolder(m));
+      statusMsg = "creada con meses";
+    }
 
-    // Asignar color vía Drive API v2 si está disponible
+    // Si ya existía, nos aseguramos de que tenga los meses (sin duplicar)
+    if (statusMsg.includes("ya existia")) {
+      cfg.monthNames.forEach(m => getOrCreate(qFolder, m));
+    }
+
+    // Asignar/Actualizar color vía Drive API v2 o v3 si está disponible
     try {
       if (typeof Drive !== 'undefined' && Drive.Files) {
         const hex = COLOR_PALETTE.find(c => c.id === colorId)?.hex || "#9AA0A6";
-        Drive.Files.patch({ folderColorRgb: hex }, newFolder.getId());
+        const resource = { folderColorRgb: hex };
+        const fileId = qFolder.getId();
+        
+        if (Drive.Files.patch) {
+          Drive.Files.patch(resource, fileId);
+        } else if (Drive.Files.update) {
+          Drive.Files.update(resource, fileId);
+        }
       }
-    } catch (_) {}
+    } catch (e) {}
 
-    created.push({ quarter, folderName, colorId, status: "creada con meses", id: newFolder.getId() });
+    created.push({ quarter, folderName, colorId, status: statusMsg, id: qFolder.getId() });
   }
 
   return { success: true, year, created };
