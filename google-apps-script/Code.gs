@@ -185,6 +185,15 @@ function doPost(e) {
       return jsonResponse(createQuarterlyStructure(data.year, data.colorAssignments));
     }
 
+    if (data.action === "delete") {
+      const sheet = getTargetSheet();
+      if (!sheet) throw new Error("No se encuentra la hoja");
+      const rowIndex = parseInt(data.rowIndex);
+      if (isNaN(rowIndex) || rowIndex < 2) throw new Error("Índice de fila inválido");
+      sheet.deleteRow(rowIndex);
+      return ContentService.createTextOutput("SUCCESS").setMimeType(ContentService.MimeType.TEXT);
+    }
+
     // Guardar fila en Sheet
     const sheet = getTargetSheet();
     if (!sheet) throw new Error("No se encuentra la hoja '" + SHEET_NAME + "'");

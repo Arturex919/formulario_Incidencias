@@ -3,7 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   FileText, Send, CheckCircle, AlertCircle, ChevronDown,
   User, Home, Calendar, ClipboardList, Wrench, DollarSign,
-  MessageSquare, PlusCircle, Loader2, Moon, Sun, Truck, Eraser, Pencil, FolderPlus
+  MessageSquare, PlusCircle, Loader2, Moon, Sun, Truck, Eraser, Pencil, FolderPlus,
+  Search, Trash2, ChevronLeft, ChevronRight
 } from 'lucide-react';
 // ─── Opciones del desplegable (igual que en el Excel) ──────────────────────────
 const CLASIFICACIONES = [
@@ -18,7 +19,7 @@ const CLASIFICACIONES = [
 
 const ESTADOS_INICIALES = ["PENDIENTE", "RESUELTA"];
 
-const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx5GLuQbIEPak16uBdguej4ExQCKSg6cq05j7vRMhQTTUCMJVmrmZ0DKUcNmSsZ4Ppp/exec";
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz2zUgaCAw9xS1b1sQpwA1IQhuokfD0eFwiMZhbNSLPSxa9jcBdoQlsVWH_gitcRn_3/exec";
 
 // ─── Estado inicial del formulario ────────────────────────────────────────────
 const FORM_INICIAL = {
@@ -100,9 +101,16 @@ export default function App() {
   // Nombre del archivo seleccionado para el campo REF
   const [selectedRefFileName, setSelectedRefFileName] = useState("");
 
+  // Historial: Filtros y Paginación
+  const [filterPropiedad, setFilterPropiedad] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 5;
+
   // Propiedades desde Google Sheet (sin Apps Script)
   const [propiedadesLocales, setPropiedadesLocales] = useState([]);
   const [loadingPropiedades, setLoadingPropiedades] = useState(false);
+  const [searchPropiedad, setSearchPropiedad] = useState("");
+  const [showPropDropdown, setShowPropDropdown] = useState(false);
 
   useEffect(() => {
     const fetchPropiedades = async () => {
@@ -120,11 +128,16 @@ export default function App() {
             if (row.c && row.c[0] && row.c[0].v) {
               const propName = row.c[0].v;
               let ref = '';
-              if (row.c[1]) {
-                if (row.c[1].f) ref = row.c[1].f;
-                else if (row.c[1].v) ref = String(row.c[1].v);
+              // Ahora la REF está en la columna D (índice 3) tras la inserción de nuevas columnas
+              if (row.c[3]) {
+                if (row.c[3].f) ref = row.c[3].f;
+                else if (row.c[3].v) ref = String(row.c[3].v);
               }
-              props.push({ name: propName, ref: ref });
+              // Capturar Encargado (Columna B -> índice 1)
+              let encargado = '';
+              if (row.c[1] && row.c[1].v) encargado = String(row.c[1].v);
+
+              props.push({ name: propName, ref: ref, encargado: encargado });
             }
           });
         }
@@ -294,6 +307,32 @@ export default function App() {
       }
     } catch (error) {
       console.error("Error al cargar historial:", error);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const handleDelete = async (inc) => {
+    if (!window.confirm(`¿Estás seguro de que deseas borrar la incidencia de "${inc["PROPIEDAD"]}"? Esta acción no se puede deshacer.`)) {
+      return;
+    }
+
+    setLoadingHistory(true);
+    try {
+      await fetch(GOOGLE_SCRIPT_URL, {
+        method: "POST",
+        mode: "no-cors",
+        body: JSON.stringify({ action: "delete", rowIndex: inc.rowIndex }),
+      });
+      
+      // Actualizar localmente eliminando el elemento
+      setIncidencias(prev => prev.filter(item => item.rowIndex !== inc.rowIndex));
+      setStatus({ type: "success", msg: "Incidencia eliminada correctamente." });
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 3000);
+    } catch (error) {
+      console.error("Error al borrar:", error);
+      setStatus({ type: "error", msg: "Error al borrar la incidencia." });
     } finally {
       setLoadingHistory(false);
     }
@@ -690,26 +729,70 @@ export default function App() {
                   <label htmlFor="propiedad">
                     <Home size={14} /> Propiedad <span className="req">*</span>
                   </label>
-                  <div className="select-wrap">
-                    <select
-                      id="propiedad"
-                      name="propiedad"
-                      value={form.propiedad}
-                      onChange={handleChange}
-                      required
-                    >
-                      <option value="">— Seleccionar Propiedad —</option>
-                      {loadingPropiedades ? (
-                        <option value="" disabled>Cargando propiedades...</option>
-                      ) : (
-                        propiedadesLocales.map((p, i) => (
-                          <option key={i} value={p.name}>
-                            {p.ref ? `[${p.ref}] ` : ''}{p.name}
-                          </option>
-                        ))
+                  <div className="searchable-select-container">
+                    <div className="search-input-wrap">
+                      <Search size={16} className="search-icon-inner" />
+                      <input
+                        type="text"
+                        className="prop-search-input"
+                        placeholder="Buscar por REF o Nombre..."
+                        value={showPropDropdown ? searchPropiedad : (form.propiedad || "")}
+                        onFocus={() => { setShowPropDropdown(true); setSearchPropiedad(""); }}
+                        onChange={(e) => setSearchPropiedad(e.target.value)}
+                        onBlur={() => setTimeout(() => setShowPropDropdown(false), 200)}
+                      />
+                      <ChevronDown size={18} className={`select-arrow ${showPropDropdown ? 'up' : ''}`} />
+                    </div>
+
+                    <AnimatePresence>
+                      {showPropDropdown && (
+                        <motion.div 
+                          className="search-results-dropdown"
+                          initial={{ opacity: 0, y: -10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -10 }}
+                        >
+                          {loadingPropiedades ? (
+                            <div className="dropdown-item disabled">Cargando propiedades...</div>
+                          ) : (() => {
+                            const filtered = propiedadesLocales.filter(p => {
+                              const search = searchPropiedad.toLowerCase();
+                              const name = (p.name || "").toLowerCase();
+                              const ref = (p.ref || "").toLowerCase();
+                              const encargado = (p.encargado || "").toLowerCase();
+                              
+                              return name.includes(search) || ref.includes(search) || encargado.includes(search);
+                            });
+
+                            if (filtered.length === 0) {
+                              return <div className="dropdown-item disabled">No se encontraron resultados</div>;
+                            }
+
+                            return filtered.map((p, i) => (
+                              <div 
+                                key={i} 
+                                className={`dropdown-item ${form.propiedad === p.name ? 'selected' : ''}`}
+                                onClick={() => {
+                                  setForm(prev => ({ ...prev, propiedad: p.name }));
+                                  setSearchPropiedad(p.name);
+                                  setShowPropDropdown(false);
+                                }}
+                              >
+                                <div className="prop-item-main">
+                                  <span className="prop-ref">[{p.ref || '—'}]</span>
+                                  <span className="prop-name">{p.name}</span>
+                                </div>
+                                {p.encargado && (
+                                  <div className="prop-item-meta">
+                                    <span className="prop-encargado">👤 {p.encargado}</span>
+                                  </div>
+                                )}
+                              </div>
+                            ));
+                          })()}
+                        </motion.div>
                       )}
-                    </select>
-                    <ChevronDown size={18} className="select-arrow" />
+                    </AnimatePresence>
                   </div>
                 </div>
               </div>
@@ -822,58 +905,132 @@ export default function App() {
         {/* ── TAB: HISTORIAL ── */}
         {activeTab === "historial" && (
           <motion.div key="history" className="history-list" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+            
+            {/* ── BARRA DE BÚSQUEDA ── */}
+            <div className="glass-card history-filter-card animate-fade-in">
+              <div className="search-box">
+                <Search size={20} className="search-icon" />
+                <input 
+                  type="text" 
+                  placeholder="Buscar por alojamiento..." 
+                  value={filterPropiedad}
+                  onChange={(e) => {
+                    setFilterPropiedad(e.target.value);
+                    setCurrentPage(1); // Reset a página 1 al filtrar
+                  }}
+                />
+              </div>
+            </div>
+
             {loadingHistory ? (
               <div className="glass-card" style={{ textAlign: 'center', padding: '4rem' }}>
                 <Loader2 size={40} className="spin icon-accent" />
                 <p>Cargando historial...</p>
               </div>
-            ) : incidencias.length === 0 ? (
-              <div className="glass-card" style={{ textAlign: 'center', padding: '4rem' }}>
-                <AlertCircle size={40} className="icon-accent" style={{ opacity: 0.5 }} />
-                <p>No hay registros.</p>
-              </div>
-            ) : (
-              incidencias.map((inc, i) => (
-                <div key={i} className="glass-card history-card animate-fade-in">
-                  <div className="card-header">
-                    <div className="card-title-wrap">
-                      <h3>{inc["PROPIEDAD"] || "Sin Nombre"}</h3>
-                      <p className="card-date">{formatearFecha(inc["FECHA"] || inc["FECHA REPORTE INCIDENCIA"])}</p>
-                    </div>
-                    <div style={{ display: 'flex', gap: '0.8rem', alignItems: 'center' }}>
-                      <button className="btn btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}
-                        onClick={() => handleEdit(inc)}>
-                        <Pencil size={14} /> Editar
-                      </button>
-                      <span className={`badge-status ${(inc["ESTADO"] || "pendiente").toLowerCase()}`}>
-                        {inc["ESTADO"] || "PENDIENTE"}
-                      </span>
-                    </div>
-                  </div>
+            ) : (() => {
+              // Filtrado
+              const filtered = incidencias.filter(inc => {
+                const searchLower = filterPropiedad.toLowerCase();
+                const matchesPropiedad = (inc["PROPIEDAD"] || "").toLowerCase().includes(searchLower);
+                // Buscamos por la referencia (usando la clave 'ref' que viene del Excel)
+                const matchesRef = (String(inc["ref"] || "")).toLowerCase().includes(searchLower);
+                return matchesPropiedad || matchesRef;
+              });
+              
+              // Paginación
+              const totalPages = Math.ceil(filtered.length / itemsPerPage);
+              const paginatedData = filtered.slice(
+                (currentPage - 1) * itemsPerPage,
+                currentPage * itemsPerPage
+              );
 
-                  <div className="card-grid">
-                    <div className="data-item">
-                      <span className="data-label">Responsable</span>
-                      <span className="data-value">{inc["RESPONSABLE DEL REPORTE"]}</span>
-                    </div>
-                    <div className="data-item">
-                      <span className="data-label">Categoría</span>
-                      <span className="data-value">{inc["CLASIFICACION DE LA INCIDENCIA"]}</span>
-                    </div>
-                    <div className="data-item full-width-item">
-                      <span className="data-label">Descripción</span>
-                      <div className="description-box">{inc["DESCRIPCION DE LA INCIDENCIA"]}</div>
-                    </div>
-                    {inc["PLAN DE ACCION"] && (
-                      <div className="data-item full-width-item">
-                        <span className="data-label">Plan de Acción (Próximos pasos)</span>
-                        <span className="data-value" style={{ color: '#ff4d4d' }}>{inc["PLAN DE ACCION"]}</span>
-                      </div>
-                    )}
+              if (filtered.length === 0) {
+                return (
+                  <div className="glass-card" style={{ textAlign: 'center', padding: '4rem' }}>
+                    <AlertCircle size={40} className="icon-accent" style={{ opacity: 0.5 }} />
+                    <p>{filterPropiedad ? "No se encontraron resultados para esta búsqueda." : "No hay registros."}</p>
                   </div>
-                </div>
-              ))
-            )}
+                );
+              }
+
+              return (
+                <>
+                  {paginatedData.map((inc, i) => (
+                    <div key={inc.rowIndex || i} className="glass-card history-card animate-fade-in">
+                      <div className="card-header">
+                        <div className="card-title-wrap">
+                          <h3>{inc["PROPIEDAD"] || "Sin Nombre"}</h3>
+                          <p className="card-date">{formatearFecha(inc["FECHA"] || inc["FECHA REPORTE INCIDENCIA"])}</p>
+                        </div>
+                        <div className="card-actions-history">
+                          <button className="btn btn-secondary btn-icon-only" title="Editar"
+                            onClick={() => handleEdit(inc)}>
+                            <Pencil size={16} />
+                          </button>
+                          <button className="btn btn-danger btn-icon-only" title="Borrar"
+                            onClick={() => handleDelete(inc)}>
+                            <Trash2 size={16} />
+                          </button>
+                          <span className={`badge-status ${(inc["ESTADO"] || "pendiente").toLowerCase()}`}>
+                            {inc["ESTADO"] || "PENDIENTE"}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="card-grid">
+                        <div className="data-item">
+                          <span className="data-label">Ref. Factura</span>
+                          <span className="data-value">{inc["ref"] || "—"}</span>
+                        </div>
+                        <div className="data-item">
+                          <span className="data-label">Responsable</span>
+                          <span className="data-value">{inc["RESPONSABLE DEL REPORTE"]}</span>
+                        </div>
+                        <div className="data-item">
+                          <span className="data-label">Categoría</span>
+                          <span className="data-value">{inc["CLASIFICACION DE LA INCIDENCIA"]}</span>
+                        </div>
+                        <div className="data-item full-width-item">
+                          <span className="data-label">Descripción</span>
+                          <div className="description-box">{inc["DESCRIPCION DE LA INCIDENCIA"]}</div>
+                        </div>
+                        {inc["PLAN DE ACCION"] && (
+                          <div className="data-item full-width-item">
+                            <span className="data-label">Plan de Acción (Próximos pasos)</span>
+                            <span className="data-value" style={{ color: '#ff4d4d' }}>{inc["PLAN DE ACCION"]}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* ── PAGINACIÓN ── */}
+                  {totalPages > 1 && (
+                    <div className="pagination-wrap animate-fade-in">
+                      <button 
+                        className="pagination-btn" 
+                        disabled={currentPage === 1}
+                        onClick={() => setCurrentPage(prev => prev - 1)}
+                      >
+                        <ChevronLeft size={20} />
+                      </button>
+                      
+                      <div className="pagination-info">
+                        Página <strong>{currentPage}</strong> de {totalPages}
+                      </div>
+
+                      <button 
+                        className="pagination-btn" 
+                        disabled={currentPage === totalPages}
+                        onClick={() => setCurrentPage(prev => prev + 1)}
+                      >
+                        <ChevronRight size={20} />
+                      </button>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </motion.div>
         )}
 
