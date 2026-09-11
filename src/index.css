@@ -713,6 +713,14 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   font-size: 0.8rem;
 }
 
+.invoice-id-mini {
+  display: block;
+  font-family: monospace;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+
 .upload-status-mini {
   padding: 0.6rem 1rem;
   border-radius: 8px;
