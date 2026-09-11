@@ -13,7 +13,14 @@
 const SPREADSHEET_ID       = "1joSFjd6yZS9rjVwbXzuZSU1SVCScbEIVovSexqrO7ZE";
 const SHEET_NAME           = "INCIDENCIA 2026";
 const DRIVE_ROOT_FOLDER_ID = "16FuhBMu4n-Pv8feGdtWQxyVjGtXzna-J";
+// Carpeta "Facturas-Incidencias": espejo de cada factura organizado por Propiedad > Año > Trimestre.
+const DRIVE_PROPERTIES_ROOT_ID = "1517c0MB86MKUh4Ehx8WwWA4f05c9YOQd";
 const TARGET_YEAR          = new Date().getFullYear().toString(); // "2026"
+
+// ── Lodgify: fuente de propiedades ─────────────────────────────────────────────
+// La API key va en Project Settings > Script Properties (LODGIFY_API_KEY), nunca en el código.
+const LODGIFY_API_URL           = "https://api.lodgify.com/v2/properties";
+const MANUAL_PROPERTIES_SHEET   = "PROPIEDADES MANUALES"; // propiedades que no están en Lodgify
 
 // ── Trimestres ────────────────────────────────────────────────────────────────
 const QUARTER_CONFIG = {
@@ -63,6 +70,23 @@ function matchColorToPalette(hexColor) {
   if (!hexColor) return { id: "GRAY", label: "Sin color", hex: "#9AA0A6" };
   const norm = hexColor.toUpperCase().trim();
   return COLOR_PALETTE.find(c => c.hex.toUpperCase() === norm) || { id: "GRAY", label: "Sin color", hex: "#9AA0A6" };
+}
+
+// REF del nombre del archivo. Dos formatos:
+//   "lo que sea 007.pdf"                  → 007  (el que genera esta app al subir)
+//   "Factura_AngelFerreiro_003_2026.pdf"  → 003  (ref de 3-4 dígitos delante del año)
+// Un año suelto al final NO es referencia, y "07-04-2026 - 06-05-2026" es una fecha, no una ref.
+function refFromFileName(fileName) {
+  const nameNoExt = fileName.replace(/\.[^.]+$/, '');
+
+  const conAnio = nameNoExt.match(/[\s\-_](\d{3,4})[\s\-_](?:19|20)\d{2}$/);
+  if (conAnio) return String(conAnio[1]).padStart(3,'0');
+
+  const suelto = nameNoExt.match(/[\s\-_](\d{1,4})$/);
+  if (!suelto) return "---";
+  const num = parseInt(suelto[1], 10);
+  if (num >= 1900 && num <= 2100) return "---";
+  return String(suelto[1]).padStart(3,'0');
 }
 
 function getOrCreate(parent, name) {
@@ -115,6 +139,7 @@ function findQuarterFolder(quarterKey, yearHint) {
   return genericFolder;
 }
 
+
 // ── Subcarpeta del MES dentro del trimestre ──────────────────────────────────
 function getMonthSubFolder(quarterFolder, monthName) {
   const upper = monthName.toUpperCase();
@@ -130,6 +155,99 @@ function getMonthSubFolder(quarterFolder, monthName) {
   return quarterFolder.createFolder(upper);
 }
 
+// ── Subcarpeta INCIDENCIAS dentro del trimestre (separada de GASTO DE EMPRESA) ──
+function getIncidenciasFolder(quarterFolder) {
+  return getOrCreate(quarterFolder, "INCIDENCIAS");
+}
+
+// ── Carpeta espejo por propiedad: Facturas-Incidencias / <Propiedad> / <Año> / <Trimestre> ───
+function getPropertyQuarterFolder(propiedad, quarterKey, year) {
+  const root       = DriveApp.getFolderById(DRIVE_PROPERTIES_ROOT_ID);
+  const propFolder = getOrCreate(root, String(propiedad).trim());
+  const yearFolder = getOrCreate(propFolder, String(year));
+  return getOrCreate(yearFolder, QUARTER_CONFIG[quarterKey].label);
+}
+
+// Crea de antemano Propiedad > Año > (Q1..Q4) para cada propiedad del sistema.
+function createPropertyFolders(propiedades, year) {
+  const ty      = year || TARGET_YEAR;
+  const root    = DriveApp.getFolderById(DRIVE_PROPERTIES_ROOT_ID);
+  const created = [];
+
+  (propiedades || []).forEach(p => {
+    const name = String(p || "").trim();
+    if (!name) return;
+    const propFolder = getOrCreate(root, name);
+    const yearFolder = getOrCreate(propFolder, String(ty));
+    Object.values(QUARTER_CONFIG).forEach(cfg => getOrCreate(yearFolder, cfg.label));
+    created.push({ propiedad: name, id: propFolder.getId() });
+  });
+
+  return { success: true, year: ty, count: created.length, created };
+}
+
+// ── Propiedades desde Lodgify (paginado) ──────────────────────────────────────
+function getLodgifyProperties() {
+  const apiKey = PropertiesService.getScriptProperties().getProperty("LODGIFY_API_KEY");
+  if (!apiKey) return { error: "Falta LODGIFY_API_KEY en Project Settings > Script Properties", names: [] };
+
+  const names = [];
+  let page = 1;
+  const size = 50;
+  while (true) {
+    const res = UrlFetchApp.fetch(LODGIFY_API_URL + "?page=" + page + "&size=" + size, {
+      headers: { "X-ApiKey": apiKey },
+      muteHttpExceptions: true
+    });
+    if (res.getResponseCode() !== 200) {
+      return { error: "Lodgify " + res.getResponseCode() + ": " + res.getContentText(), names };
+    }
+    const body  = JSON.parse(res.getContentText());
+    const items = body.data || [];
+    items.forEach(p => { if (p.name) names.push(String(p.name).trim()); });
+
+    const total = (body.pagination && body.pagination.total) || items.length;
+    if (items.length === 0 || page * size >= total) break;
+    page++;
+  }
+  return { names };
+}
+
+// ── Propiedades añadidas a mano (no están en Lodgify) ─────────────────────────
+function getManualPropertiesSheet() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  let sheet = ss.getSheets().find(s => s.getName() === MANUAL_PROPERTIES_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(MANUAL_PROPERTIES_SHEET);
+    sheet.appendRow(["NOMBRE"]);
+  }
+  return sheet;
+}
+
+function getManualProperties() {
+  const values = getManualPropertiesSheet().getDataRange().getValues();
+  return values.slice(1).map(r => String(r[0] || "").trim()).filter(Boolean);
+}
+
+function addManualProperty(name) {
+  const clean = String(name || "").trim();
+  if (!clean) return { success: false, error: "Nombre vacío" };
+  const existing = getManualProperties();
+  if (existing.some(n => n.toUpperCase() === clean.toUpperCase())) {
+    return { success: true, alreadyExists: true, manual: existing };
+  }
+  getManualPropertiesSheet().appendRow([clean]);
+  return { success: true, manual: existing.concat([clean]) };
+}
+
+// ── Unión: Lodgify + manuales, sin duplicados ─────────────────────────────────
+function getAllProperties() {
+  const lodgify = getLodgifyProperties();
+  const manual  = getManualProperties();
+  const unique  = [...new Set(lodgify.names.concat(manual))].sort((a, b) => a.localeCompare(b));
+  return { error: lodgify.error || null, lodgify: lodgify.names, manual, all: unique };
+}
+
 // ── doGet ─────────────────────────────────────────────────────────────────────
 function doGet(e) {
   try {
@@ -140,6 +258,10 @@ function doGet(e) {
     if (action === "getNextRef")     return jsonResponse({ nextRef: String(getNextInvoiceRef(e.parameter.month, e.parameter.year)).padStart(3,'0') });
     if (action === "getAllRefs")     return jsonResponse({ refs: getAllInvoiceRefs(e.parameter.month, e.parameter.year) });
     if (action === "ensureMonths")   return jsonResponse(ensureMonthFolders(e.parameter.year));
+    if (action === "findInvoice" || action === "findInvoiceById") {
+      return jsonResponse(findInvoiceSmart(e.parameter.id, e.parameter.name, e.parameter.ref, e.parameter.month, e.parameter.year, e.parameter.propiedad));
+    }
+    if (action === "getProperties")  return jsonResponse(getAllProperties());
 
     const sheet = getTargetSheet();
     if (!sheet) return jsonResponse({ error: "Hoja no encontrada" });
@@ -178,11 +300,19 @@ function doPost(e) {
     const data = JSON.parse(e.postData.contents);
 
     if (data.action === "uploadInvoice") {
-      return jsonResponse(saveInvoiceToDrive(data.fileBase64, data.fileName, data.refNumber || null, data.month || null, data.year || null));
+      return jsonResponse(saveInvoiceToDrive(data.fileBase64, data.fileName, data.refNumber || null, data.month || null, data.year || null, data.propiedad || null, data.invoiceId || null, data.invoiceName || null));
     }
 
     if (data.action === "createYearStructure") {
       return jsonResponse(createQuarterlyStructure(data.year, data.colorAssignments));
+    }
+
+    if (data.action === "createPropertyFolders") {
+      return jsonResponse(createPropertyFolders(data.propiedades, data.year));
+    }
+
+    if (data.action === "addManualProperty") {
+      return jsonResponse(addManualProperty(data.name));
     }
 
     if (data.action === "delete") {
@@ -285,48 +415,49 @@ function getMonthFiles(month, year) {
   const quarterFolder = findQuarterFolder(quarterKey, year || TARGET_YEAR);
   if (!quarterFolder) return [];
 
-  // Buscar subcarpeta del mes
+  const incidenciasFolder = getIncidenciasFolder(quarterFolder);
   const monthUpper = month.toUpperCase();
-  const folders = quarterFolder.getFolders();
-  let fileSource = null;
-  while (folders.hasNext()) {
-    const folder = folders.next();
-    const fname = folder.getName().toUpperCase();
-    if (fname === monthUpper || fname === month.toUpperCase()) {
-      fileSource = folder;
-      break;
-    }
-  }
-  
-  if (!fileSource) return [];
-
   const colorHex  = getFolderColorById(quarterFolder.getId());
   const colorInfo = matchColorToPalette(colorHex);
   const results   = [];
-  const files     = fileSource.getFiles();
 
-  while (files.hasNext()) {
-    const file     = files.next();
-    const fileName = file.getName();
-    const nameNoExt = fileName.replace(/\.[^.]+$/, '');
+  function collectFiles(folder, propiedad) {
+    const files = folder.getFiles();
+    while (files.hasNext()) {
+      const file     = files.next();
+      const fileName = file.getName();
+      const nameNoExt = fileName.replace(/\.[^.]+$/, '');
 
-    // REF: número corto (1-4 dígitos) al final del nombre
-    const refMatch  = nameNoExt.match(/[\s\-_](\d{1,4})$/);
-    const ref       = refMatch ? String(refMatch[1]).padStart(3,'0') : "---";
-    const clientName = refMatch
-      ? nameNoExt.replace(/[\s\-_]\d{1,4}$/, '').trim()
-      : nameNoExt.trim();
+      const ref       = refFromFileName(fileName);
+      const clientName = ref === "---"
+        ? nameNoExt.trim()
+        : nameNoExt.replace(/[\s\-_]\d{1,4}([\s\-_](?:19|20)\d{2})?$/, '').trim();
 
-    results.push({
-      ref:        String(ref),
-      fullName:   fileName,
-      clientName,
-      fileId:     file.getId(),
-      fileUrl:    file.getUrl(),
-      folderName: quarterFolder.getName(),
-      colorLabel: colorInfo.label,
-      colorHex:   colorInfo.hex
-    });
+      results.push({
+        ref:        String(ref),
+        fullName:   fileName,
+        clientName,
+        propiedad:  propiedad,
+        fileId:     file.getId(),
+        fileUrl:    file.getUrl(),
+        folderName: quarterFolder.getName(),
+        colorLabel: colorInfo.label,
+        colorHex:   colorInfo.hex
+      });
+    }
+  }
+
+  // INCIDENCIAS/<Propiedad>/<Mes> — una carpeta de propiedad, y dentro la del mes
+  const propFolders = incidenciasFolder.getFolders();
+  while (propFolders.hasNext()) {
+    const pf = propFolders.next();
+    const monthFolders = pf.getFolders();
+    while (monthFolders.hasNext()) {
+      const mf = monthFolders.next();
+      if (mf.getName().toUpperCase() === monthUpper) {
+        collectFiles(mf, pf.getName());
+      }
+    }
   }
 
   return results.sort((a, b) => {
@@ -337,8 +468,8 @@ function getMonthFiles(month, year) {
   });
 }
 
-// ── GUARDAR FACTURA → Trimestre > Mes ────────────────────────────────────────
-function saveInvoiceToDrive(base64Data, originalFileName, refNumber, month, year) {
+// ── GUARDAR FACTURA → Trimestre > INCIDENCIAS > Propiedad > Mes ──────────────
+function saveInvoiceToDrive(base64Data, originalFileName, refNumber, month, year, propiedad, invoiceId, invoiceName) {
   const tm = month || MONTH_NAMES_ES[new Date().getMonth()];
   const ty = year  || TARGET_YEAR;
 
@@ -353,8 +484,10 @@ function saveInvoiceToDrive(base64Data, originalFileName, refNumber, month, year
     return { success: false, error: "No se encontró carpeta trimestral para " + tm + " " + ty + ". Crea la estructura en el panel de Administración." };
   }
 
-  // Subcarpeta del mes (crear si no existe)
-  const targetFolder = getMonthSubFolder(quarterFolder, tm);
+  // INCIDENCIAS/<Propiedad>/<Mes> (si no viene propiedad, el mes queda directo en INCIDENCIAS)
+  const incidenciasFolder = getIncidenciasFolder(quarterFolder);
+  const propFolder   = propiedad ? getOrCreate(incidenciasFolder, String(propiedad).trim()) : incidenciasFolder;
+  const targetFolder = getMonthSubFolder(propFolder, tm);
 
   // REF como String corto
   const nextNum   = getNextInvoiceRef(tm, ty);
@@ -365,7 +498,8 @@ function saveInvoiceToDrive(base64Data, originalFileName, refNumber, month, year
   const extMatch    = originalFileName.match(/\.([^.]+)$/);
   const ext         = extMatch ? extMatch[1] : 'pdf';
   const baseName    = originalFileName.replace(/\.[^.]+$/, '').trim();
-  const newFileName = baseName + ' ' + paddedRef + '.' + ext;
+  // El ID va ANTES del REF en el nombre: refFromFileName necesita el REF al final para no romper el parseo.
+  const newFileName = baseName + (invoiceId ? ' ' + invoiceId : '') + ' ' + paddedRef + '.' + ext;
 
   const extLow = ext.toLowerCase();
   let mimeType = 'application/octet-stream';
@@ -377,14 +511,259 @@ function saveInvoiceToDrive(base64Data, originalFileName, refNumber, month, year
   const blob    = Utilities.newBlob(Utilities.base64Decode(content), mimeType, newFileName);
   const file    = targetFolder.createFile(blob);
 
+  // Copia espejo en Facturas-Incidencias (carpeta por propiedad), coordinada con la carpeta principal
+  if (propiedad) {
+    file.makeCopy(newFileName, getPropertyQuarterFolder(propiedad, quarterKey, ty));
+  }
+
   return {
     success:    true,
     ref:        paddedRef,
     fileUrl:    file.getUrl(),
     fileName:   newFileName,
     folderId:   targetFolder.getId(),
-    folderPath: quarterFolder.getName() + " / " + targetFolder.getName()
+    folderPath: quarterFolder.getName() + " / INCIDENCIAS" + (propiedad ? " / " + propFolder.getName() : "") + " / " + targetFolder.getName()
   };
+}
+
+// ── BUSCAR UNA FACTURA POR REF EN TODO EL AÑO ────────────────────────────────
+// 1. Escanea las carpetas trimestrales bajo DRIVE_ROOT_FOLDER_ID.
+// 2. Si no encuentra nada (p.ej. DRIVE_ROOT_FOLDER_ID no está al nivel correcto),
+//    usa DriveApp.searchFiles como fallback global.
+function findInvoiceByRef(ref, year, monthHint) {
+  const target = String(ref || "").replace(/\D/g, '');
+  if (!target) return { found: false };
+
+  const padded  = target.padStart(3, '0');
+  const yearStr = year || TARGET_YEAR;
+  const root    = DriveApp.getFolderById(DRIVE_ROOT_FOLDER_ID);
+  const matches = [];
+
+  function scan(folder, path) {
+    const files = folder.getFiles();
+    while (files.hasNext()) {
+      const file = files.next();
+      if (refFromFileName(file.getName()) !== padded) continue;
+      matches.push({
+        ref:      padded,
+        fullName: file.getName(),
+        fileId:   file.getId(),
+        fileUrl:  file.getUrl(),
+        path:     path
+      });
+    }
+    const subs = folder.getFolders();
+    while (subs.hasNext()) {
+      const sub = subs.next();
+      scan(sub, path + " / " + sub.getName());
+    }
+  }
+
+  // ── 1. Escaneo estructurado desde la raíz ────────────────────────────────
+  const quarters = root.getFolders();
+  while (quarters.hasNext()) {
+    const q    = quarters.next();
+    const name = q.getName().toUpperCase();
+    const esTrimestre = Object.keys(QUARTER_CONFIG).some(k => QUARTER_CONFIG[k].keywords.some(kw => name.includes(kw)));
+    if (!esTrimestre) continue;
+    if (/\d{4}/.test(name) && !name.includes(yearStr)) continue; // carpeta de otro año → fuera
+    scan(q, q.getName());
+  }
+
+  // ── 2. Fallback: búsqueda nativa de Drive por título ─────────────────────
+  // Cubre casos donde DRIVE_ROOT_FOLDER_ID no es el padre directo de los
+  // trimestres, o cuando el escaneo recursivo no llega por alguna razón.
+  if (matches.length === 0) {
+    try {
+      const driveResults = DriveApp.searchFiles(
+        "title contains ' " + padded + "' and trashed = false"
+      );
+      while (driveResults.hasNext()) {
+        const file = driveResults.next();
+        if (refFromFileName(file.getName()) !== padded) continue;
+        // Verificar que pertenece al año correcto subiendo por los padres
+        let inYear = false;
+        try {
+          let parents = file.getParents();
+          while (parents.hasNext() && !inYear) {
+            const p = parents.next();
+            if (p.getName().includes(yearStr)) { inYear = true; break; }
+            const gp = p.getParents();
+            while (gp.hasNext() && !inYear) {
+              if (gp.next().getName().includes(yearStr)) inYear = true;
+            }
+          }
+        } catch (_) { inYear = true; }
+        if (!inYear) continue;
+        matches.push({
+          ref:      padded,
+          fullName: file.getName(),
+          fileId:   file.getId(),
+          fileUrl:  file.getUrl(),
+          path:     buildPathToRoot(file)
+        });
+      }
+    } catch (_) {}
+  }
+
+  if (matches.length === 0) return { found: false, ref: padded, year: yearStr };
+
+  // El mes de la incidencia manda: si hay varias con la misma ref, primero la de ese mes
+  if (monthHint) {
+    const mh = String(monthHint).toUpperCase();
+    matches.sort(function (a, b) {
+      const am = a.path.toUpperCase().indexOf(mh) >= 0 ? 0 : 1;
+      const bm = b.path.toUpperCase().indexOf(mh) >= 0 ? 0 : 1;
+      return am - bm;
+    });
+  }
+
+  return { found: true, file: matches[0], total: matches.length };
+}
+
+// ── BÚSQUEDA INTELIGENTE DE FACTURAS ─────────────────────────────────────────
+// 1. Por ID único (FAC-XXXXX...) -> rápido, exacto, sin falsos positivos.
+// 2. Por Nombre de Factura -> si se especificó nombre ("prueba", etc.)
+// 3. Por Ref -> fallback para incidencias que solo tienen número de referencia.
+function findInvoiceSmart(id, name, ref, month, year, propiedad) {
+  const cleanId   = String(id || "").trim();
+  const cleanName = String(name || "").trim();
+  const cleanRef  = String(ref || "").trim();
+  const paddedRef = cleanRef && /^\d+$/.test(cleanRef) ? cleanRef.padStart(3, '0') : "";
+  const yearStr   = String(year || TARGET_YEAR).trim();
+  const monthStr  = String(month || "").trim();
+  const propStr   = String(propiedad || "").trim().toUpperCase();
+
+  // ── 1. Buscar PRIMERO dentro de la carpeta del mes (solo facturas oficiales) ──
+  const monthFiles = (monthStr ? getMonthFiles(monthStr, yearStr) : []);
+
+  if (monthFiles && monthFiles.length > 0) {
+    // Puntuar cada archivo de la carpeta según coincidencia
+    const scored = monthFiles.map(f => {
+      let score = 0;
+      const fNameUpper = f.fullName.toUpperCase();
+
+      // Coincidencia exacta por ID de factura
+      if (cleanId && fNameUpper.indexOf(cleanId.toUpperCase()) !== -1) {
+        score += 100;
+      }
+      // Coincidencia por Nombre de factura (si no es la palabra genérica "prueba")
+      if (cleanName && cleanName.length >= 3 && cleanName.toLowerCase() !== "prueba") {
+        if (fNameUpper.indexOf(cleanName.toUpperCase()) !== -1) score += 50;
+      }
+      // Coincidencia por Propiedad (ej. "VILLA GRAO" en el nombre del archivo)
+      if (propStr && propStr.length >= 3 && fNameUpper.indexOf(propStr) !== -1) {
+        score += 30;
+      }
+      // Coincidencia por Ref
+      if (paddedRef && f.ref === paddedRef) {
+        score += 20;
+      }
+
+      return { file: f, score };
+    });
+
+    scored.sort((a, b) => b.score - a.score);
+
+    // Si hubo coincidencia con alguna puntuación positiva, devolverla
+    if (scored[0].score > 0) {
+      return {
+        found: true,
+        foundInMonth: monthStr,
+        file: scored[0].file,
+        monthFiles: monthFiles,
+        total: monthFiles.length
+      };
+    }
+  }
+
+  // ── 2. Si no se encontró en ese mes, buscar en los DEMÁS meses del año ──────
+  const otherMonths = MONTH_NAMES_ES.filter(m => m.toUpperCase() !== monthStr.toUpperCase());
+  for (let i = 0; i < otherMonths.length; i++) {
+    const mName = otherMonths[i];
+    const filesInM = getMonthFiles(mName, yearStr);
+    if (!filesInM || filesInM.length === 0) continue;
+
+    for (let j = 0; j < filesInM.length; j++) {
+      const f = filesInM[j];
+      const fUpper = f.fullName.toUpperCase();
+      let matched = false;
+
+      if (cleanId && fUpper.indexOf(cleanId.toUpperCase()) !== -1) matched = true;
+      if (cleanName && cleanName.length >= 3 && cleanName.toLowerCase() !== "prueba" && fUpper.indexOf(cleanName.toUpperCase()) !== -1) matched = true;
+      if (paddedRef && f.ref === paddedRef) matched = true;
+
+      if (matched) {
+        return {
+          found: true,
+          foundInMonth: mName,
+          file: f,
+          monthFiles: filesInM,
+          total: filesInM.length
+        };
+      }
+    }
+  }
+
+  // ── 3. Si no hubo coincidencia en otros meses pero el mes original tenía archivos, devolver el primero ──
+  if (monthFiles && monthFiles.length > 0) {
+    return {
+      found: true,
+      foundInMonth: monthStr,
+      file: monthFiles[0],
+      monthFiles: monthFiles,
+      total: monthFiles.length
+    };
+  }
+
+  // ── 4. Fallback por REF en las carpetas trimestrales del año ───────────────
+  if (paddedRef) {
+    const resRef = findInvoiceByRef(paddedRef, yearStr, monthStr);
+    if (resRef.found) return resRef;
+  }
+
+  // ── 3. Búsqueda por ID único (solo PDFs e imágenes dentro del proyecto) ────
+  if (cleanId && /^FAC-[A-Z0-9]+-[A-Z0-9]+$/i.test(cleanId)) {
+    try {
+      const q = "title contains '" + cleanId.toUpperCase() + "' and trashed = false and (mimeType = 'application/pdf' or mimeType contains 'image/')";
+      const files = DriveApp.searchFiles(q);
+      if (files.hasNext()) {
+        const file = files.next();
+        return {
+          found: true,
+          matchBy: "id",
+          file: {
+            ref:      refFromFileName(file.getName()) || paddedRef,
+            fullName: file.getName(),
+            fileId:   file.getId(),
+            fileUrl:  file.getUrl(),
+            path:     buildPathToRoot(file)
+          }
+        };
+      }
+    } catch (_) {}
+  }
+
+  return { found: false };
+}
+
+function findInvoiceById(id) {
+  return findInvoiceSmart(id, "", "", "", "", "");
+}
+
+// Construye el path relativo desde el archivo hasta la raíz del proyecto.
+function buildPathToRoot(file) {
+  let path = "";
+  try {
+    let parents = file.getParents();
+    while (parents.hasNext()) {
+      const p = parents.next();
+      if (p.getId() === DRIVE_ROOT_FOLDER_ID) break;
+      path = path ? p.getName() + " / " + path : p.getName();
+      parents = p.getParents();
+    }
+  } catch (_) {}
+  return path;
 }
 
 // ── SIGUIENTE REFERENCIA ──────────────────────────────────────────────────────
@@ -458,6 +837,52 @@ function createQuarterlyStructure(year, colorAssignments) {
   }
 
   return { success: true, year, created };
+}
+
+// ── MIGRAR FACTURAS DEL ESQUEMA VIEJO (Trimestre/Mes/Propiedad) AL NUEVO (Trimestre/INCIDENCIAS/Propiedad/Mes) ──
+// Solo MUEVE archivos, no borra nada. Correr UNA VEZ a mano desde el editor de Apps Script (▶) por año.
+function migrateOldInvoicesToIncidencias(year) {
+  const ty    = year || TARGET_YEAR;
+  const moved = [];
+
+  Object.keys(QUARTER_CONFIG).forEach(qKey => {
+    const quarterFolder = findQuarterFolder(qKey, ty);
+    if (!quarterFolder) return;
+    const incidenciasFolder = getIncidenciasFolder(quarterFolder);
+
+    const subfolders = quarterFolder.getFolders();
+    while (subfolders.hasNext()) {
+      const sub     = subfolders.next();
+      const subName = sub.getName().toUpperCase();
+      if (subName === "INCIDENCIAS" || subName === "GASTO DE EMPRESA") continue;
+      if (!MONTH_NAMES_ES.some(m => m.toUpperCase() === subName)) continue; // no es carpeta de mes del esquema viejo
+
+      // Facturas sueltas directo en el Mes (sin propiedad) → INCIDENCIAS/<Mes>
+      const looseTarget = getMonthSubFolder(incidenciasFolder, subName);
+      const looseFiles  = sub.getFiles();
+      while (looseFiles.hasNext()) {
+        const f = looseFiles.next();
+        f.moveTo(looseTarget);
+        moved.push({ file: f.getName(), to: "INCIDENCIAS/" + subName });
+      }
+
+      // Subcarpetas de propiedad dentro del Mes → INCIDENCIAS/<Propiedad>/<Mes>
+      const propSubs = sub.getFolders();
+      while (propSubs.hasNext()) {
+        const propSub         = propSubs.next();
+        const newPropFolder   = getOrCreate(incidenciasFolder, propSub.getName());
+        const newMonthFolder  = getMonthSubFolder(newPropFolder, subName);
+        const propFiles       = propSub.getFiles();
+        while (propFiles.hasNext()) {
+          const f = propFiles.next();
+          f.moveTo(newMonthFolder);
+          moved.push({ file: f.getName(), to: "INCIDENCIAS/" + propSub.getName() + "/" + subName });
+        }
+      }
+    }
+  });
+
+  return { success: true, year: ty, count: moved.length, moved };
 }
 
 // ── ENSURE MONTH FOLDERS (para trimestres existentes) ────────────────────────

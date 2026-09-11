@@ -5,7 +5,7 @@ import {
   FileText, Send, CheckCircle, AlertCircle, ChevronDown,
   User, Home, Calendar, ClipboardList, Wrench, DollarSign,
   MessageSquare, PlusCircle, Loader2, Moon, Sun, Truck, Eraser, Pencil, FolderPlus,
-  Search, Trash2, ChevronLeft, ChevronRight
+  Search, Trash2, ChevronLeft, ChevronRight, Eye
 } from 'lucide-react';
 // ─── Opciones del desplegable (igual que en el Excel) ──────────────────────────
 const CLASIFICACIONES = [
@@ -20,7 +20,9 @@ const CLASIFICACIONES = [
 
 const ESTADOS_INICIALES = ["PENDIENTE", "RESUELTA"];
 
-const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz2zUgaCAw9xS1b1sQpwA1IQhuokfD0eFwiMZhbNSLPSxa9jcBdoQlsVWH_gitcRn_3/exec";
+const MONTHS = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwhQ4teH9bNt6HVNgYrKi_sfZ9HvujWQppcLaLIp80P2LbcpHPiNPcu6mWFU6eIUXcW/exec";
 
 // ─── Estado inicial del formulario ────────────────────────────────────────────
 const FORM_INICIAL = {
@@ -37,6 +39,8 @@ const FORM_INICIAL = {
   accionTomada: "",
   planAccion: "",
   estado: "PENDIENTE",
+  nombreFactura: "",
+  idFactura: "",
   rowIndex: null,
 };
 
@@ -72,6 +76,168 @@ const normalizarFechaParaInput = (fechaRaw) => {
   }
 };
 
+// La hoja tiene dos columnas de referencia: "ref" (histórico) y "REF. FACTURA " (con
+// espacio final). Se lee la que tenga valor para que se vean las filas viejas y las nuevas.
+const refDeIncidencia = (inc) => {
+  const raw = inc["ref"] || inc["REF. FACTURA "] || inc["REF. FACTURA"] || "";
+  return String(raw).trim() === "" ? "" : String(raw).trim().padStart(3, '0');
+};
+
+// Identificador único de cada factura: se genera aquí porque el POST va en no-cors
+// y no se puede leer la respuesta del Apps Script.
+const nuevoIdFactura = () =>
+  `FAC-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+
+// ─── Vista previa de la factura ya guardada en Drive ──────────────────────────
+// Busca inteligentemente en el mes correspondiente o en cualquier otro mes del año
+function FacturaPreview({ refNum, fecha, idFactura, nombreFactura, propiedad, mes: mesPeriodo, anio: anioPeriodo }) {
+  const d = new Date(fecha);
+  const valida = !isNaN(d.getTime());
+  const defaultMes = mesPeriodo || MONTHS[valida ? d.getMonth() : new Date().getMonth()];
+  const defaultAnio = anioPeriodo || String(valida ? d.getFullYear() : new Date().getFullYear());
+
+  const [currentMonth, setCurrentMonth] = useState(defaultMes);
+  const [currentYear, setCurrentYear] = useState(defaultAnio);
+  const [file, setFile] = useState(undefined); // undefined = cargando, null = no encontrada
+  const [monthFiles, setMonthFiles] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelado = false;
+
+    async function buscar() {
+      setLoading(true);
+      try {
+        const params = new URLSearchParams({
+          action: "findInvoice",
+          id: idFactura || "",
+          name: nombreFactura || "",
+          ref: refNum || "",
+          month: currentMonth || "",
+          year: currentYear || "",
+          propiedad: propiedad || ""
+        });
+        const res = await fetch(`${GOOGLE_SCRIPT_URL}?${params.toString()}`);
+        const data = await res.json();
+        if (!cancelado) {
+          if (data.found && data.file) {
+            setFile(data.file);
+            if (data.foundInMonth && data.foundInMonth !== currentMonth) {
+              setCurrentMonth(data.foundInMonth);
+            }
+          } else {
+            setFile(null);
+          }
+          if (Array.isArray(data.monthFiles)) {
+            setMonthFiles(data.monthFiles);
+          } else {
+            setMonthFiles([]);
+          }
+        }
+      } catch (err) {
+        if (!cancelado) setFile(null);
+      } finally {
+        if (!cancelado) setLoading(false);
+      }
+    }
+
+    buscar();
+    return () => { cancelado = true; };
+  }, [refNum, currentMonth, currentYear, idFactura, nombreFactura, propiedad]);
+
+  return (
+    <div className="preview-container animate-fade-in">
+      <div className="preview-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.6rem', padding: '0.5rem 0.8rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+          {/* Selector de periodo (Mes y Año) */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>Mes:</span>
+            <select
+              value={currentMonth}
+              onChange={(e) => setCurrentMonth(e.target.value)}
+              style={{
+                background: 'rgba(255,255,255,0.08)',
+                color: 'inherit',
+                border: '1px solid rgba(255,255,255,0.2)',
+                borderRadius: '6px',
+                padding: '3px 6px',
+                fontSize: '0.78rem'
+              }}
+            >
+              {MONTHS.map(m => <option key={m} value={m} style={{ color: '#000' }}>{m}</option>)}
+            </select>
+            <select
+              value={currentYear}
+              onChange={(e) => setCurrentYear(e.target.value)}
+              style={{
+                background: 'rgba(255,255,255,0.08)',
+                color: 'inherit',
+                border: '1px solid rgba(255,255,255,0.2)',
+                borderRadius: '6px',
+                padding: '3px 6px',
+                fontSize: '0.78rem'
+              }}
+            >
+              {[2024, 2025, 2026, 2027].map(y => <option key={y} value={String(y)} style={{ color: '#000' }}>{y}</option>)}
+            </select>
+          </div>
+
+          {/* Selector de archivo del mes */}
+          {monthFiles.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+                Archivo ({monthFiles.length}):
+              </span>
+              <select
+                value={file?.fileId || ""}
+                onChange={(e) => {
+                  const sel = monthFiles.find(f => f.fileId === e.target.value);
+                  if (sel) setFile(sel);
+                }}
+                style={{
+                  background: 'rgba(255,255,255,0.08)',
+                  color: 'inherit',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  borderRadius: '6px',
+                  padding: '3px 8px',
+                  fontSize: '0.78rem',
+                  maxWidth: '300px'
+                }}
+              >
+                {monthFiles.map(f => (
+                  <option key={f.fileId} value={f.fileId} style={{ color: '#000' }}>
+                    {f.fullName} {f.ref && f.ref !== '---' ? `(Ref ${f.ref})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+
+        {file && (
+          <a href={file.fileUrl} target="_blank" rel="noreferrer" style={{ fontSize: '0.78rem' }}>Abrir en Drive</a>
+        )}
+      </div>
+
+      {loading ? (
+        <div className="upload-status-mini info" style={{ margin: '0.8rem' }}>
+          Buscando facturas en {currentMonth} {currentYear}...
+        </div>
+      ) : file ? (
+        <iframe
+          src={`https://drive.google.com/file/d/${file.fileId}/preview`}
+          title="Vista previa de la factura"
+          className="preview-media pdf-preview"
+        />
+      ) : (
+        <div className="upload-status-mini error" style={{ margin: '0.8rem' }}>
+          No hay facturas en {currentMonth} {currentYear}. Puedes cambiar el mes o año arriba para buscar en otro periodo.
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Componente principal ──────────────────────────────────────────────────────
 export default function App() {
   const [form, setForm] = useState(FORM_INICIAL);
@@ -88,7 +254,6 @@ export default function App() {
   const [isEditing, setIsEditing] = useState(false);
 
   // Gestión de Facturas y Referencias
-  const MONTHS = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
   const currentYear = new Date().getFullYear();
   const [selectedMonth, setSelectedMonth] = useState(MONTHS[new Date().getMonth()]);
   const [selectedYear, setSelectedYear] = useState(currentYear.toString());
@@ -104,6 +269,7 @@ export default function App() {
 
   // Historial: Filtros y Paginación
   const [filterPropiedad, setFilterPropiedad] = useState("");
+  const [previewRow, setPreviewRow] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 5;
 
@@ -181,7 +347,7 @@ export default function App() {
   useEffect(() => {
     if (activeTab === "historial") fetchIncidencias();
     if (activeTab === "nuevo") fetchNextRef(selectedMonth, selectedYear);
-    if (activeTab === "administracion") fetchScanStructure(selectedAdminYear);
+    if (activeTab === "administracion") { fetchScanStructure(selectedAdminYear); fetchAdminProperties(); }
   }, [activeTab]);
 
   useEffect(() => {
@@ -201,13 +367,16 @@ export default function App() {
       const dataAll = await resAll.json();
       if (Array.isArray(dataAll.refs)) {
         // Forzar ref como string en cada item
-        setExistingRefs(dataAll.refs.map(item => ({ ...item, ref: String(item.ref) })));
-      } else {
-        setExistingRefs([]);
+        const refs = dataAll.refs.map(item => ({ ...item, ref: String(item.ref) }));
+        setExistingRefs(refs);
+        return refs;
       }
+      setExistingRefs([]);
+      return [];
     } catch (error) {
       console.error("Error al obtener referencias:", error);
       setExistingRefs([]);
+      return [];
     } finally {
       setLoadingRefs(false);
     }
@@ -293,6 +462,72 @@ export default function App() {
     }
   };
 
+  // Propiedades para creación de carpetas: Lodgify (fuente real) + añadidas a mano
+  const [adminProperties, setAdminProperties] = useState({ all: [], lodgify: [], manual: [] });
+  const [loadingAdminProps, setLoadingAdminProps] = useState(false);
+  const [adminPropsError, setAdminPropsError] = useState(null);
+  const [newPropertyName, setNewPropertyName] = useState("");
+  const [addingProperty, setAddingProperty] = useState(false);
+
+  const fetchAdminProperties = async () => {
+    setLoadingAdminProps(true);
+    setAdminPropsError(null);
+    try {
+      const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getProperties`);
+      const data = await res.json();
+      setAdminProperties({ all: data.all || [], lodgify: data.lodgify || [], manual: data.manual || [] });
+      if (data.error) setAdminPropsError(data.error);
+    } catch (err) {
+      setAdminPropsError('Error de conexión con Lodgify: ' + err.message);
+    } finally {
+      setLoadingAdminProps(false);
+    }
+  };
+
+  const handleAddProperty = async () => {
+    const name = newPropertyName.trim();
+    if (!name) return;
+    setAddingProperty(true);
+    try {
+      await fetch(GOOGLE_SCRIPT_URL, {
+        method: 'POST',
+        mode: 'no-cors',
+        body: JSON.stringify({ action: 'addManualProperty', name })
+      });
+      setNewPropertyName("");
+      await fetchAdminProperties();
+    } catch (err) {
+      setAdminPropsError('Error al añadir propiedad: ' + err.message);
+    } finally {
+      setAddingProperty(false);
+    }
+  };
+
+  const [creatingPropFolders, setCreatingPropFolders] = useState(false);
+  const [propFoldersResult, setPropFoldersResult] = useState(null);
+
+  const handleCreatePropertyFolders = async () => {
+    if (adminProperties.all.length === 0) return;
+    setCreatingPropFolders(true);
+    setPropFoldersResult(null);
+    try {
+      await fetch(GOOGLE_SCRIPT_URL, {
+        method: 'POST',
+        mode: 'no-cors',
+        body: JSON.stringify({
+          action: 'createPropertyFolders',
+          year: selectedAdminYear,
+          propiedades: adminProperties.all
+        })
+      });
+      setPropFoldersResult({ success: true, msg: `✅ Carpetas creadas en Facturas-Incidencias para ${adminProperties.all.length} propiedades (${selectedAdminYear}).` });
+    } catch (err) {
+      setPropFoldersResult({ success: false, msg: '❌ Error: ' + err.message });
+    } finally {
+      setCreatingPropFolders(false);
+    }
+  };
+
   const fetchIncidencias = async () => {
     setLoadingHistory(true);
     try {
@@ -344,7 +579,7 @@ export default function App() {
     const dataToEdit = {
       responsable: inc["RESPONSABLE DEL REPORTE"] || "",
       fecha: normalizarFechaParaInput(inc["FECHA"] || inc["FECHA REPORTE INCIDENCIA"]),
-      ref: inc["ref"] || "",
+      ref: refDeIncidencia(inc),
       propiedad: inc["PROPIEDAD"] || "",
       clasificacion: CLASIFICACIONES.includes(inc["CLASIFICACION DE LA INCIDENCIA"])
         ? inc["CLASIFICACION DE LA INCIDENCIA"]
@@ -359,6 +594,8 @@ export default function App() {
       accionTomada: inc["ACCION TOMADA"] || "",
       planAccion: inc["PLAN DE ACCION"] || "",
       estado: inc["ESTADO"] || "PENDIENTE",
+      nombreFactura: inc["NOMBRE FACTURA"] || "",
+      idFactura: inc["ID FACTURA"] || "",
       rowIndex: inc.rowIndex,
     };
 
@@ -385,6 +622,14 @@ export default function App() {
     const file = e.target.files[0];
     if (!file) return;
 
+    if (!form.propiedad) {
+      setUploadStatus({ type: 'error', msg: 'Selecciona antes la propiedad: la factura se guarda en su subcarpeta.' });
+      e.target.value = "";
+      return;
+    }
+
+    const idFactura = nuevoIdFactura();
+
     // Crear URL temporal para la vista previa
     const fileUrl = URL.createObjectURL(file);
     setPreviewUrl(fileUrl);
@@ -408,9 +653,12 @@ export default function App() {
             action: "uploadInvoice",
             fileBase64: base64,
             fileName: file.name,
+            invoiceId: idFactura,
+            invoiceName: form.nombreFactura.trim(),
             refNumber: String(currentNextRef), // FORZAR STRING para evitar float
             month: selectedMonth,
-            year: selectedYear
+            year: selectedYear,
+            propiedad: form.propiedad
           };
 
           // POST a Apps Script con no-cors para evitar el bloqueo del navegador
@@ -420,13 +668,17 @@ export default function App() {
             body: JSON.stringify(payload)
           });
 
-          // Asumimos éxito (no-cors no nos deja leer la respuesta json)
-          setForm(prev => ({ ...prev, ref: currentNextRef }));
+          // no-cors no deja leer la respuesta: se comprueba en Drive que la factura está
+          const refs = await fetchNextRef(selectedMonth, selectedYear);
+          const enDrive = refs.some(r => r.ref === String(currentNextRef).padStart(3, '0'));
+
+          if (!enDrive) {
+            setUploadStatus({ type: 'error', msg: `⚠️ Drive no confirma la factura ${currentNextRef} en ${selectedMonth} ${selectedYear}. No se ha guardado: revisa que exista la carpeta del trimestre.` });
+            return;
+          }
+
+          setForm(prev => ({ ...prev, ref: currentNextRef, idFactura }));
           setSelectedRefFileName(finalFileName);
-
-          // Recargamos las referencias desde Drive
-          await fetchNextRef(selectedMonth, selectedYear);
-
           setUploadStatus({ type: 'success', msg: `✅ Factura subida: "${finalFileName}"` });
           setShowSuccess(true);
           setTimeout(() => setShowSuccess(false), 3000);
@@ -459,6 +711,9 @@ export default function App() {
 
     const payload = {
       "REF. FACTURA": form.ref,
+      "ref": form.ref, // la hoja tiene las dos columnas: se escriben ambas para que no se desincronicen
+      "ID FACTURA": form.idFactura,
+      "NOMBRE FACTURA": form.nombreFactura,
       "PROPIEDAD": form.propiedad,
       "CLASIFICACION DE LA INCIDENCIA": clasificacionFinal,
       "DESCRIPCION DE LA INCIDENCIA": form.descripcion,
@@ -586,19 +841,27 @@ export default function App() {
               </div>
             </div>
 
-            {/* ── SECCIÓN DE SUBIDA DE FACTURA ── */}
-            {!isEditing && (
-              <div className="upload-zone animate-fade-in">
+            {/* ── SECCIÓN DE SUBIDA DE FACTURA (también al editar) ── */}
+            <div className="upload-zone animate-fade-in">
                 <div className="upload-header">
                   <Truck size={18} />
                   <span>Carga de Factura (Auto-Ref)</span>
                 </div>
                 <div className="upload-content">
+                  <div className="field-group">
+                    <label htmlFor="nombreFactura">
+                      <FileText size={14} /> Nombre de la factura
+                    </label>
+                    <input id="nombreFactura" name="nombreFactura" type="text"
+                      value={form.nombreFactura} onChange={handleChange}
+                      placeholder="Ej. Fontanería baño principal" />
+                  </div>
                   <label htmlFor="invoice-upload" className={`upload-label ${isUploading ? 'uploading' : ''}`}>
                     {isUploading ? <Loader2 size={24} className="spin" /> : <PlusCircle size={24} />}
                     <div className="upload-text">
                       <p>{isUploading ? "Procesando..." : "Haz clic o arrastra la factura"}</p>
                       <small>Se asignará la referencia {nextRef} automáticamente</small>
+                      {form.idFactura && <small className="invoice-id-mini">ID: {form.idFactura}</small>}
                     </div>
                     <input
                       id="invoice-upload"
@@ -632,7 +895,20 @@ export default function App() {
                     )}
                   </div>
                 )}
-              </div>
+            </div>
+
+            {/* Factura ya guardada en Drive (edición o ref seleccionada) */}
+            {(form.ref || form.nombreFactura || form.idFactura) && !previewUrl && (
+              <FacturaPreview
+                key={form.idFactura || form.nombreFactura || form.ref}
+                refNum={form.ref}
+                fecha={form.fecha}
+                idFactura={form.idFactura}
+                nombreFactura={form.nombreFactura}
+                propiedad={form.propiedad}
+                mes={selectedMonth}
+                anio={selectedYear}
+              />
             )}
 
             <form onSubmit={handleSubmit} noValidate>
@@ -677,7 +953,7 @@ export default function App() {
                         value={selectedYear}
                         onChange={e => setSelectedYear(e.target.value)}
                       >
-                        {[currentYear - 2, currentYear - 1, currentYear, currentYear + 1, currentYear + 2].map(y => (
+                        {[currentYear - 2, currentYear - 1, currentYear, currentYear + 1, currentYear + 2, currentYear + 3].map(y => (
                           <option key={y} value={y.toString()}>{y}</option>
                         ))}
                       </select>
@@ -694,22 +970,25 @@ export default function App() {
                       value={form.ref}
                       onChange={e => {
                         const val = e.target.value;
-                        setForm(prev => ({ ...prev, ref: val }));
-                        // Guardar el nombre del archivo asociado a la ref
-                        const found = existingRefs.find(r => r.ref === val);
+                        const found = existingRefs.find(r => (r.fileId || r.ref) === val || r.ref === val);
+                        setForm(prev => ({
+                          ...prev,
+                          ref: found?.ref && found.ref !== "---" ? found.ref : (val !== "---" ? val : prev.ref),
+                          nombreFactura: found ? (found.clientName || found.fullName) : prev.nombreFactura,
+                          idFactura: prev.idFactura
+                        }));
                         setSelectedRefFileName(found ? found.fullName : "");
                       }}
                     >
-                      <option value="">— Seleccionar referencia —</option>
+                      <option value="">— Seleccionar referencia o archivo —</option>
                       {nextRef !== "..." && (
                         <option value={nextRef}>⭐ Nueva: {nextRef} (siguiente disponible)</option>
                       )}
                       {existingRefs.length > 0 && (
                         <optgroup label={`── ${selectedMonth} ${selectedYear} en Drive (${existingRefs.length}) ──`}>
                           {existingRefs.map(item => (
-                            <option key={item.fileId || item.ref} value={item.ref}>
-                              {/* Mostramos el nombre completo del archivo tal como está en Drive */}
-                              {item.fullName}
+                            <option key={item.fileId || item.ref} value={item.fileId || item.ref}>
+                              {item.fullName} {item.ref && item.ref !== "---" ? `(Ref ${item.ref})` : ""}
                             </option>
                           ))}
                         </optgroup>
@@ -934,7 +1213,7 @@ export default function App() {
                 const searchLower = filterPropiedad.toLowerCase();
                 const matchesPropiedad = (inc["PROPIEDAD"] || "").toLowerCase().includes(searchLower);
                 // Buscamos por la referencia (usando la clave 'ref' que viene del Excel)
-                const matchesRef = (String(inc["ref"] || "")).toLowerCase().includes(searchLower);
+                const matchesRef = refDeIncidencia(inc).toLowerCase().includes(searchLower);
                 return matchesPropiedad || matchesRef;
               });
               
@@ -964,6 +1243,12 @@ export default function App() {
                           <p className="card-date">{formatearFecha(inc["FECHA"] || inc["FECHA REPORTE INCIDENCIA"])}</p>
                         </div>
                         <div className="card-actions-history">
+                          {(refDeIncidencia(inc) || inc["NOMBRE FACTURA"] || inc["ID FACTURA"]) && (
+                            <button className="btn btn-secondary btn-icon-only" title="Ver factura"
+                              onClick={() => setPreviewRow(prev => prev === inc.rowIndex ? null : inc.rowIndex)}>
+                              <Eye size={16} />
+                            </button>
+                          )}
                           <button className="btn btn-secondary btn-icon-only" title="Editar"
                             onClick={() => handleEdit(inc)}>
                             <Pencil size={16} />
@@ -981,8 +1266,15 @@ export default function App() {
                       <div className="card-grid">
                         <div className="data-item">
                           <span className="data-label">Ref. Factura</span>
-                          <span className="data-value">{inc["ref"] || "—"}</span>
+                          <span className="data-value">{refDeIncidencia(inc) || "—"}</span>
                         </div>
+                        {(inc["NOMBRE FACTURA"] || inc["ID FACTURA"]) && (
+                          <div className="data-item">
+                            <span className="data-label">Factura</span>
+                            <span className="data-value">{inc["NOMBRE FACTURA"] || "—"}</span>
+                            <span className="invoice-id-mini">{inc["ID FACTURA"]}</span>
+                          </div>
+                        )}
                         <div className="data-item">
                           <span className="data-label">Responsable</span>
                           <span className="data-value">{inc["RESPONSABLE DEL REPORTE"]}</span>
@@ -1002,6 +1294,24 @@ export default function App() {
                           </div>
                         )}
                       </div>
+
+                      {previewRow === inc.rowIndex && (
+                        <FacturaPreview
+                          refNum={refDeIncidencia(inc)}
+                          fecha={inc["FECHA"] || inc["FECHA REPORTE INCIDENCIA"]}
+                          idFactura={inc["ID FACTURA"]}
+                          nombreFactura={inc["NOMBRE FACTURA"]}
+                          propiedad={inc["PROPIEDAD"]}
+                          mes={(() => {
+                            const d = new Date(inc["FECHA"] || inc["FECHA REPORTE INCIDENCIA"]);
+                            return !isNaN(d.getTime()) ? MONTHS[d.getMonth()] : undefined;
+                          })()}
+                          anio={(() => {
+                            const d = new Date(inc["FECHA"] || inc["FECHA REPORTE INCIDENCIA"]);
+                            return !isNaN(d.getTime()) ? String(d.getFullYear()) : undefined;
+                          })()}
+                        />
+                      )}
                     </div>
                   ))}
 
@@ -1048,7 +1358,7 @@ export default function App() {
             <div className="admin-toolbar">
               <div className="select-wrap" style={{ maxWidth: 140 }}>
                 <select value={selectedAdminYear} onChange={e => { setSelectedAdminYear(e.target.value); setAdminScan(null); setMonthFiles([]); }}>
-                  {[currentYear - 2, currentYear - 1, currentYear, currentYear + 1, currentYear + 2].map(y => <option key={y} value={y}>{y}</option>)}
+                  {[currentYear - 2, currentYear - 1, currentYear, currentYear + 1, currentYear + 2, currentYear + 3].map(y => <option key={y} value={y}>{y}</option>)}
                 </select>
                 <ChevronDown size={16} className="select-arrow" />
               </div>
@@ -1056,7 +1366,38 @@ export default function App() {
                 {loadingAdmin ? <Loader2 size={16} className="spin" /> : <Wrench size={16} />}
                 Escanear Drive
               </button>
+              <button className="btn btn-secondary" onClick={handleCreatePropertyFolders} disabled={creatingPropFolders || loadingAdminProps || adminProperties.all.length === 0}>
+                {creatingPropFolders ? <Loader2 size={16} className="spin" /> : <PlusCircle size={16} />}
+                Crear carpetas de propiedades ({adminProperties.all.length})
+              </button>
+              {propFoldersResult && (
+                <span className={`upload-status-mini ${propFoldersResult.success ? 'success' : 'error'}`}>{propFoldersResult.msg}</span>
+              )}
             </div>
+
+            {/* -- Propiedades: Lodgify + añadidas a mano -- */}
+            <div className="admin-toolbar" style={{ marginTop: '0.75rem' }}>
+              <input
+                type="text"
+                placeholder="Propiedad que no está en Lodgify..."
+                value={newPropertyName}
+                onChange={e => setNewPropertyName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleAddProperty()}
+                style={{ flex: 1, minWidth: 220 }}
+              />
+              <button className="btn btn-secondary" onClick={handleAddProperty} disabled={addingProperty || !newPropertyName.trim()}>
+                {addingProperty ? <Loader2 size={16} className="spin" /> : <PlusCircle size={16} />}
+                Añadir propiedad
+              </button>
+            </div>
+            {adminPropsError && (
+              <div className="status-msg error" style={{ margin: '0.5rem 0' }}>⚠️ {adminPropsError}</div>
+            )}
+            {adminProperties.manual.length > 0 && (
+              <p style={{ fontSize: '0.85rem', opacity: 0.8 }}>
+                Añadidas a mano ({adminProperties.manual.length}): {adminProperties.manual.join(', ')}
+              </p>
+            )}
 
             {/* Error de escaneo */}
             {adminError && (
