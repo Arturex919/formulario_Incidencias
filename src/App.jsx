@@ -1271,7 +1271,7 @@ export default function App() {
                           <p className="card-date">{formatearFecha(inc["FECHA"] || inc["FECHA REPORTE INCIDENCIA"])}</p>
                         </div>
                         <div className="card-actions-history">
-                          {(refDeIncidencia(inc) || inc["NOMBRE FACTURA"] || inc["ID FACTURA"]) && (
+                          {(refDeIncidencia(inc) || inc["ID FACTURA"]) && (
                             <button className="btn btn-secondary btn-icon-only" title="Ver factura"
                               onClick={() => setPreviewRow(prev => prev === inc.rowIndex ? null : inc.rowIndex)}>
                               <Eye size={16} />
@@ -1531,6 +1531,18 @@ export default function App() {
                 <li>"Escanear Drive" muestra qué colores de carpeta están libres/ocupados por trimestre para el año elegido.</li>
                 <li>"Crear carpetas de propiedades" prepara en Drive la estructura Propiedad / Año / Trimestre para todas las propiedades activas.</li>
                 <li>Puedes añadir a mano una propiedad que no esté en Lodgify.</li>
+              </ol>
+            </div>
+
+            <div className="help-section">
+              <h3><FileText size={16} /> Enlaces</h3>
+              <ol>
+                <li>
+                  Hoja de cálculo "INCIDENCIAS" (donde vive el historial):{" "}
+                  <a href="https://docs.google.com/spreadsheets/d/1AX7UffufsU2XoLxosH5CZGYj8egdLj1gDYJlS30VnD8/edit" target="_blank" rel="noreferrer">
+                    abrir en Google Sheets
+                  </a>
+                </li>
               </ol>
             </div>
           </motion.div>
