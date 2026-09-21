@@ -705,15 +705,19 @@ function findInvoiceSmart(id, name, ref, month, year, propiedad) {
     }
   }
 
-  // ── 3. Si no hubo coincidencia en otros meses pero el mes original tenía archivos, devolver el primero ──
-  if (monthFiles && monthFiles.length > 0) {
-    return {
-      found: true,
-      foundInMonth: monthStr,
-      file: monthFiles[0],
-      monthFiles: monthFiles,
-      total: monthFiles.length
-    };
+  // ── 3. Si no hubo coincidencia por id/nombre/ref, solo devolver del mes original
+  //      si al menos la PROPIEDAD coincide (si no, sería mostrar la factura de otro alojamiento) ──
+  if (monthFiles && monthFiles.length > 0 && propStr && propStr.length >= 3) {
+    const porPropiedad = monthFiles.find(f => String(f.propiedad || "").toUpperCase().indexOf(propStr) !== -1);
+    if (porPropiedad) {
+      return {
+        found: true,
+        foundInMonth: monthStr,
+        file: porPropiedad,
+        monthFiles: monthFiles,
+        total: monthFiles.length
+      };
+    }
   }
 
   // ── 4. Fallback por REF en las carpetas trimestrales del año ───────────────
