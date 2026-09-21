@@ -10,12 +10,13 @@
  * - Admin panel: solo scanStructure + createYearStructure (sin listado de facturas).
  */
 
-const SPREADSHEET_ID       = "1joSFjd6yZS9rjVwbXzuZSU1SVCScbEIVovSexqrO7ZE";
-const SHEET_NAME           = "INCIDENCIA 2026";
+const SPREADSHEET_ID       = "1AX7UffufsU2XoLxosH5CZGYj8egdLj1gDYJlS30VnD8";
+const TARGET_YEAR          = new Date().getFullYear().toString(); // "2026"
+// La pestaña sigue el año en curso: en enero de 2027 hay que crear "INCIDENCIA 2027" en el Sheet, nada más.
+const SHEET_NAME           = "INCIDENCIA " + TARGET_YEAR;
 const DRIVE_ROOT_FOLDER_ID = "16FuhBMu4n-Pv8feGdtWQxyVjGtXzna-J";
 // Carpeta "Facturas-Incidencias": espejo de cada factura organizado por Propiedad > Año > Trimestre.
 const DRIVE_PROPERTIES_ROOT_ID = "1517c0MB86MKUh4Ehx8WwWA4f05c9YOQd";
-const TARGET_YEAR          = new Date().getFullYear().toString(); // "2026"
 
 // ── Lodgify: fuente de propiedades ─────────────────────────────────────────────
 // La API key va en Project Settings > Script Properties (LODGIFY_API_KEY), nunca en el código.
