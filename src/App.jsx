@@ -5,7 +5,7 @@ import {
   FileText, Send, CheckCircle, AlertCircle, ChevronDown,
   User, Home, Calendar, ClipboardList, Wrench, DollarSign,
   MessageSquare, PlusCircle, Loader2, Moon, Sun, Truck, Eraser, Pencil, FolderPlus,
-  Search, Trash2, ChevronLeft, ChevronRight, Eye
+  Search, Trash2, ChevronLeft, ChevronRight, Eye, HelpCircle
 } from 'lucide-react';
 // ─── Opciones del desplegable (igual que en el Excel) ──────────────────────────
 const CLASIFICACIONES = [
@@ -269,6 +269,7 @@ export default function App() {
 
   // Historial: Filtros y Paginación
   const [filterPropiedad, setFilterPropiedad] = useState("");
+  const [filterMonth, setFilterMonth] = useState("");
   const [previewRow, setPreviewRow] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 5;
@@ -815,6 +816,12 @@ export default function App() {
         >
           <Wrench size={18} /> Administración
         </button>
+        <button
+          className={`tab-btn ${activeTab === "ayuda" ? "active" : ""}`}
+          onClick={() => setActiveTab("ayuda")}
+        >
+          <HelpCircle size={18} /> Ayuda
+        </button>
       </nav>
 
       {/* ── CONTENIDO DINÁMICO ─────────────────────── */}
@@ -1200,6 +1207,19 @@ export default function App() {
                   }}
                 />
               </div>
+              <div className="select-wrap">
+                <select
+                  value={filterMonth}
+                  onChange={(e) => {
+                    setFilterMonth(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                >
+                  <option value="">Todos los meses</option>
+                  {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+                <ChevronDown size={16} className="select-arrow" />
+              </div>
             </div>
 
             {loadingHistory ? (
@@ -1214,7 +1234,15 @@ export default function App() {
                 const matchesPropiedad = (inc["PROPIEDAD"] || "").toLowerCase().includes(searchLower);
                 // Buscamos por la referencia (usando la clave 'ref' que viene del Excel)
                 const matchesRef = refDeIncidencia(inc).toLowerCase().includes(searchLower);
-                return matchesPropiedad || matchesRef;
+                const matchesSearch = matchesPropiedad || matchesRef;
+
+                const matchesMonth = (() => {
+                  if (!filterMonth) return true;
+                  const d = new Date(inc["FECHA"] || inc["FECHA REPORTE INCIDENCIA"]);
+                  return !isNaN(d.getTime()) && MONTHS[d.getMonth()] === filterMonth;
+                })();
+
+                return matchesSearch && matchesMonth;
               });
               
               // Paginación
@@ -1467,6 +1495,44 @@ export default function App() {
               </div>
             )}
 
+          </motion.div>
+        )}
+
+        {/* ── TAB: AYUDA ── */}
+        {activeTab === "ayuda" && (
+          <motion.div key="ayuda" className="glass-card form-card" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+            <div className="form-section-title">
+              <HelpCircle size={20} className="icon-accent" />
+              <span>Manual de uso</span>
+            </div>
+
+            <div className="help-section">
+              <h3><PlusCircle size={16} /> Nuevo Reporte</h3>
+              <ol>
+                <li>Rellena responsable, propiedad, clasificación y descripción (los campos con * son obligatorios).</li>
+                <li>Si hay factura de por medio: elige primero la propiedad, luego el mes/año del periodo al que pertenece la factura, y sube el archivo. La referencia (REF) se asigna sola.</li>
+                <li>Guarda con "Enviar". La factura y la incidencia se guardan por separado: si subes la factura pero no llegas a guardar el formulario, la incidencia no queda en el historial aunque el archivo ya esté en Drive.</li>
+              </ol>
+            </div>
+
+            <div className="help-section">
+              <h3><ClipboardList size={16} /> Ver Historial</h3>
+              <ol>
+                <li>Busca por nombre de alojamiento o referencia de factura en la barra de búsqueda.</li>
+                <li>Filtra por mes con el desplegable de al lado. El filtro usa la <strong>fecha de la incidencia</strong>, no el mes en que se subió la factura — si registras hoy una incidencia de hace meses, aparecerá en el mes de esa fecha, no en el mes actual.</li>
+                <li>El icono del ojo abre la vista previa de la factura. Si no la encuentra en el mes de la incidencia, busca sola en el resto de meses del año antes de darla por no encontrada.</li>
+                <li>Lápiz edita, papelera borra (pide confirmación).</li>
+              </ol>
+            </div>
+
+            <div className="help-section">
+              <h3><Wrench size={16} /> Administración</h3>
+              <ol>
+                <li>"Escanear Drive" muestra qué colores de carpeta están libres/ocupados por trimestre para el año elegido.</li>
+                <li>"Crear carpetas de propiedades" prepara en Drive la estructura Propiedad / Año / Trimestre para todas las propiedades activas.</li>
+                <li>Puedes añadir a mano una propiedad que no esté en Lodgify.</li>
+              </ol>
+            </div>
           </motion.div>
         )}
 
