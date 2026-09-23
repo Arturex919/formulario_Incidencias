@@ -561,7 +561,7 @@ export default function App() {
         mode: "no-cors",
         body: JSON.stringify({ action: "delete", rowIndex: inc.rowIndex }),
       });
-      
+
       // Actualizar localmente eliminando el elemento
       setIncidencias(prev => prev.filter(item => item.rowIndex !== inc.rowIndex));
       setStatus({ type: "success", msg: "Incidencia eliminada correctamente." });
@@ -850,58 +850,58 @@ export default function App() {
 
             {/* ── SECCIÓN DE SUBIDA DE FACTURA (también al editar) ── */}
             <div className="upload-zone animate-fade-in">
-                <div className="upload-header">
-                  <Truck size={18} />
-                  <span>Carga de Factura (Auto-Ref)</span>
-                </div>
-                <div className="upload-content">
-                  <div className="field-group">
-                    <label htmlFor="nombreFactura">
-                      <FileText size={14} /> Nombre de la factura
-                    </label>
-                    <input id="nombreFactura" name="nombreFactura" type="text"
-                      value={form.nombreFactura} onChange={handleChange}
-                      placeholder="Ej. Fontanería baño principal" />
-                  </div>
-                  <label htmlFor="invoice-upload" className={`upload-label ${isUploading ? 'uploading' : ''}`}>
-                    {isUploading ? <Loader2 size={24} className="spin" /> : <PlusCircle size={24} />}
-                    <div className="upload-text">
-                      <p>{isUploading ? "Procesando..." : "Haz clic o arrastra la factura"}</p>
-                      <small>Se asignará la referencia {nextRef} automáticamente</small>
-                      {form.idFactura && <small className="invoice-id-mini">ID: {form.idFactura}</small>}
-                    </div>
-                    <input
-                      id="invoice-upload"
-                      type="file"
-                      accept=".pdf,image/*"
-                      onChange={handleFileUpload}
-                      disabled={isUploading}
-                      style={{ display: 'none' }}
-                    />
+              <div className="upload-header">
+                <Truck size={18} />
+                <span>Carga de Factura (Auto-Ref)</span>
+              </div>
+              <div className="upload-content">
+                <div className="field-group">
+                  <label htmlFor="nombreFactura">
+                    <FileText size={14} /> Nombre de la factura
                   </label>
-                  {uploadStatus && (
-                    <div className={`upload-status-mini ${uploadStatus.type}`}>
-                      {uploadStatus.msg}
-                    </div>
-                  )}
+                  <input id="nombreFactura" name="nombreFactura" type="text"
+                    value={form.nombreFactura} onChange={handleChange}
+                    placeholder="Ej. Fontanería baño principal" />
                 </div>
-
-                {/* ── VISTA PREVIA ── */}
-                {previewUrl && (
-                  <div className="preview-container animate-fade-in">
-                    <div className="preview-header">
-                      <span>Vista Previa del Documento</span>
-                      <button type="button" onClick={() => { setPreviewUrl(null); setPreviewType(null); }} className="close-preview">
-                        ✕
-                      </button>
-                    </div>
-                    {previewType && previewType.startsWith('image/') ? (
-                      <img src={previewUrl} alt="Vista previa de factura" className="preview-media" />
-                    ) : (
-                      <iframe src={previewUrl} title="Vista previa PDF" className="preview-media pdf-preview" />
-                    )}
+                <label htmlFor="invoice-upload" className={`upload-label ${isUploading ? 'uploading' : ''}`}>
+                  {isUploading ? <Loader2 size={24} className="spin" /> : <PlusCircle size={24} />}
+                  <div className="upload-text">
+                    <p>{isUploading ? "Procesando..." : "Haz clic o arrastra la factura"}</p>
+                    <small>Se asignará la referencia {nextRef} automáticamente</small>
+                    {form.idFactura && <small className="invoice-id-mini">ID: {form.idFactura}</small>}
+                  </div>
+                  <input
+                    id="invoice-upload"
+                    type="file"
+                    accept=".pdf,image/*"
+                    onChange={handleFileUpload}
+                    disabled={isUploading}
+                    style={{ display: 'none' }}
+                  />
+                </label>
+                {uploadStatus && (
+                  <div className={`upload-status-mini ${uploadStatus.type}`}>
+                    {uploadStatus.msg}
                   </div>
                 )}
+              </div>
+
+              {/* ── VISTA PREVIA ── */}
+              {previewUrl && (
+                <div className="preview-container animate-fade-in">
+                  <div className="preview-header">
+                    <span>Vista Previa del Documento</span>
+                    <button type="button" onClick={() => { setPreviewUrl(null); setPreviewType(null); }} className="close-preview">
+                      ✕
+                    </button>
+                  </div>
+                  {previewType && previewType.startsWith('image/') ? (
+                    <img src={previewUrl} alt="Vista previa de factura" className="preview-media" />
+                  ) : (
+                    <iframe src={previewUrl} title="Vista previa PDF" className="preview-media pdf-preview" />
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Factura ya guardada en Drive (edición o ref seleccionada) */}
@@ -1033,7 +1033,7 @@ export default function App() {
 
                     <AnimatePresence>
                       {showPropDropdown && (
-                        <motion.div 
+                        <motion.div
                           className="search-results-dropdown"
                           initial={{ opacity: 0, y: -10 }}
                           animate={{ opacity: 1, y: 0 }}
@@ -1047,7 +1047,7 @@ export default function App() {
                               const name = (p.name || "").toLowerCase();
                               const ref = (p.ref || "").toLowerCase();
                               const encargado = (p.encargado || "").toLowerCase();
-                              
+
                               return name.includes(search) || ref.includes(search) || encargado.includes(search);
                             });
 
@@ -1056,8 +1056,8 @@ export default function App() {
                             }
 
                             return filtered.map((p, i) => (
-                              <div 
-                                key={i} 
+                              <div
+                                key={i}
                                 className={`dropdown-item ${form.propiedad === p.name ? 'selected' : ''}`}
                                 onClick={() => {
                                   setForm(prev => ({ ...prev, propiedad: p.name }));
@@ -1192,14 +1192,14 @@ export default function App() {
         {/* ── TAB: HISTORIAL ── */}
         {activeTab === "historial" && (
           <motion.div key="history" className="history-list" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-            
+
             {/* ── BARRA DE BÚSQUEDA ── */}
             <div className="glass-card history-filter-card animate-fade-in">
               <div className="search-box">
                 <Search size={20} className="search-icon" />
-                <input 
-                  type="text" 
-                  placeholder="Buscar por alojamiento..." 
+                <input
+                  type="text"
+                  placeholder="Buscar por alojamiento..."
                   value={filterPropiedad}
                   onChange={(e) => {
                     setFilterPropiedad(e.target.value);
@@ -1244,7 +1244,7 @@ export default function App() {
 
                 return matchesSearch && matchesMonth;
               });
-              
+
               // Paginación
               const totalPages = Math.ceil(filtered.length / itemsPerPage);
               const paginatedData = filtered.slice(
@@ -1346,20 +1346,20 @@ export default function App() {
                   {/* ── PAGINACIÓN ── */}
                   {totalPages > 1 && (
                     <div className="pagination-wrap animate-fade-in">
-                      <button 
-                        className="pagination-btn" 
+                      <button
+                        className="pagination-btn"
                         disabled={currentPage === 1}
                         onClick={() => setCurrentPage(prev => prev - 1)}
                       >
                         <ChevronLeft size={20} />
                       </button>
-                      
+
                       <div className="pagination-info">
                         Página <strong>{currentPage}</strong> de {totalPages}
                       </div>
 
-                      <button 
-                        className="pagination-btn" 
+                      <button
+                        className="pagination-btn"
                         disabled={currentPage === totalPages}
                         onClick={() => setCurrentPage(prev => prev + 1)}
                       >
@@ -1538,8 +1538,8 @@ export default function App() {
               <h3><FileText size={16} /> Enlaces</h3>
               <ol>
                 <li>
-                  Hoja de cálculo "INCIDENCIAS" (donde vive el historial):{" "}
-                  <a href="https://docs.google.com/spreadsheets/d/1AX7UffufsU2XoLxosH5CZGYj8egdLj1gDYJlS30VnD8/edit" target="_blank" rel="noreferrer">
+                  Hoja de cálculo "PAGO A PROPIETARIOS NUEVO", pestaña "INCIDENCIA {new Date().getFullYear()}" (donde vive el historial):{" "}
+                  <a href="https://docs.google.com/spreadsheets/d/1joSFjd6yZS9rjVwbXzuZSU1SVCScbEIVovSexqrO7ZE/edit" target="_blank" rel="noreferrer">
                     abrir en Google Sheets
                   </a>
                 </li>

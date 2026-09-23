@@ -10,7 +10,7 @@
  * - Admin panel: solo scanStructure + createYearStructure (sin listado de facturas).
  */
 
-const SPREADSHEET_ID       = "1AX7UffufsU2XoLxosH5CZGYj8egdLj1gDYJlS30VnD8";
+const SPREADSHEET_ID       = "1joSFjd6yZS9rjVwbXzuZSU1SVCScbEIVovSexqrO7ZE";
 const TARGET_YEAR          = new Date().getFullYear().toString(); // "2026"
 // La pestaña sigue el año en curso: en enero de 2027 hay que crear "INCIDENCIA 2027" en el Sheet, nada más.
 const SHEET_NAME           = "INCIDENCIA " + TARGET_YEAR;
@@ -50,6 +50,34 @@ const COLOR_PALETTE = [
 function getTargetSheet() {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   return ss.getSheets().find(s => s.getName().trim().toUpperCase() === SHEET_NAME.toUpperCase());
+}
+
+// Caché del historial: abrir el libro (miles de fórmulas) tarda 2-50s, así que "read" solo lo abre si la caché está vacía.
+// CacheService limita cada valor a 100KB → se guarda troceado. Se invalida en cada guardado/borrado.
+const READ_CACHE_KEY = "read_" + TARGET_YEAR;
+const READ_CACHE_TTL = 300; // s — cambios hechos a mano en el Sheet tardan como mucho esto en verse
+
+function getCachedRead() {
+  const cache = CacheService.getScriptCache();
+  const n = parseInt(cache.get(READ_CACHE_KEY + "_n"), 10);
+  if (!n) return null;
+  const keys  = Array.from({ length: n }, (_, i) => READ_CACHE_KEY + "_" + i);
+  const parts = cache.getAll(keys);
+  if (keys.some(k => parts[k] == null)) return null;
+  return keys.map(k => parts[k]).join("");
+}
+
+function putCachedRead(json) {
+  const size = 30000; // caracteres; hasta 3 bytes cada uno (ñ, €) → < 100KB por trozo
+  const chunks = {};
+  let n = 0;
+  for (let i = 0; i < json.length; i += size) chunks[READ_CACHE_KEY + "_" + n++] = json.slice(i, i + size);
+  chunks[READ_CACHE_KEY + "_n"] = String(n);
+  try { CacheService.getScriptCache().putAll(chunks, READ_CACHE_TTL); } catch (_) {} // sin caché la lectura sigue funcionando
+}
+
+function clearCachedRead() {
+  CacheService.getScriptCache().remove(READ_CACHE_KEY + "_n");
 }
 
 function jsonResponse(data) {
@@ -264,6 +292,11 @@ function doGet(e) {
     }
     if (action === "getProperties")  return jsonResponse(getAllProperties());
 
+    if (action === "read") {
+      const cached = getCachedRead();
+      if (cached) return ContentService.createTextOutput(cached).setMimeType(ContentService.MimeType.JSON);
+    }
+
     const sheet = getTargetSheet();
     if (!sheet) return jsonResponse({ error: "Hoja no encontrada" });
 
@@ -285,7 +318,9 @@ function doGet(e) {
           return obj;
         })
         .filter(Boolean);
-      return jsonResponse(jsonData);
+      const json = JSON.stringify(jsonData);
+      putCachedRead(json);
+      return ContentService.createTextOutput(json).setMimeType(ContentService.MimeType.JSON);
     }
 
     return jsonResponse({ status: "ok", sheet: sheet.getName() });
@@ -322,6 +357,7 @@ function doPost(e) {
       const rowIndex = parseInt(data.rowIndex);
       if (isNaN(rowIndex) || rowIndex < 2) throw new Error("Índice de fila inválido");
       sheet.deleteRow(rowIndex);
+      clearCachedRead();
       return ContentService.createTextOutput("SUCCESS").setMimeType(ContentService.MimeType.TEXT);
     }
 
@@ -348,6 +384,7 @@ function doPost(e) {
     }
 
     sheet.getRange(targetRow, 1, 1, newRow.length).setValues([newRow]);
+    clearCachedRead();
     return ContentService.createTextOutput("SUCCESS").setMimeType(ContentService.MimeType.TEXT);
 
   } catch (error) {
