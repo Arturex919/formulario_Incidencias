@@ -27,7 +27,8 @@ const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwhQ4teH9bNt6
 // Las acciones administrativas necesitan una respuesta legible antes de confirmar éxito.
 async function requestAdmin(action, params = {}, write = false, signal) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), write ? 180000 : 60000);
+  // scanStructure en producción ha tardado 64 s medidos: 60 s cortaba consultas que sí iban a terminar.
+  const timeout = setTimeout(() => controller.abort(), 180000);
   const abort = () => controller.abort();
   signal?.addEventListener('abort', abort, { once: true });
   try {
