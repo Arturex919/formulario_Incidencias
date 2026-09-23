@@ -1,5 +1,5 @@
 // Deployment commit: desplegado
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   FileText, Send, CheckCircle, AlertCircle, ChevronDown,
@@ -249,6 +249,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("nuevo");
   const [incidencias, setIncidencias] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [historyError, setHistoryError] = useState("");
+  const historyLoadedAt = useRef(0);
+  const historyRequest = useRef(null);
 
   // Modo Edición (Visual)
   const [isEditing, setIsEditing] = useState(false);
@@ -345,8 +348,44 @@ export default function App() {
     localStorage.setItem("theme", darkMode ? "dark" : "light");
   }, [darkMode]);
 
+  const fetchIncidencias = async (force = false) => {
+    if (historyRequest.current || (!force && Date.now() - historyLoadedAt.current < 60000)) return;
+    const controller = new AbortController();
+    historyRequest.current = controller;
+    let timedOut = false;
+    const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 60000);
+    setLoadingHistory(true);
+    setHistoryError("");
+    try {
+      const response = await fetch(`${GOOGLE_SCRIPT_URL}?action=read`, { signal: controller.signal });
+      if (!response.ok) throw new Error(`Error de conexión (${response.status}).`);
+      const data = await response.json();
+      if (!Array.isArray(data)) throw new Error(data?.error || "El servidor devolvió una respuesta inesperada.");
+      if (controller.signal.aborted) return;
+      data.sort((a, b) => {
+        const dateA = new Date(a["FECHA"] || a["FECHA REPORTE INCIDENCIA"]).getTime() || 0;
+        const dateB = new Date(b["FECHA"] || b["FECHA REPORTE INCIDENCIA"]).getTime() || 0;
+        return dateB - dateA;
+      });
+      setIncidencias(data);
+      historyLoadedAt.current = Date.now();
+      setCurrentPage(1);
+    } catch (error) {
+      if (!controller.signal.aborted || timedOut) {
+        setHistoryError(timedOut
+          ? "Google Sheets está tardando demasiado. Vuelve a intentarlo."
+          : `No se pudo cargar el historial: ${error.message}`);
+      }
+    } finally {
+      clearTimeout(timeout);
+      historyRequest.current = null;
+      setLoadingHistory(false);
+    }
+  };
+
+  useEffect(() => () => historyRequest.current?.abort(), []);
+
   useEffect(() => {
-    if (activeTab === "historial") fetchIncidencias();
     if (activeTab === "nuevo") fetchNextRef(selectedMonth, selectedYear);
     if (activeTab === "administracion") { fetchScanStructure(selectedAdminYear); fetchAdminProperties(); }
   }, [activeTab]);
@@ -529,26 +568,6 @@ export default function App() {
     }
   };
 
-  const fetchIncidencias = async () => {
-    setLoadingHistory(true);
-    try {
-      const response = await fetch(`${GOOGLE_SCRIPT_URL}?action=read`);
-      const data = await response.json();
-      if (Array.isArray(data)) {
-        const sortedData = data.sort((a, b) => {
-          const dateA = new Date(a["FECHA"] || a["FECHA REPORTE INCIDENCIA"]);
-          const dateB = new Date(b["FECHA"] || b["FECHA REPORTE INCIDENCIA"]);
-          return dateB - dateA;
-        });
-        setIncidencias(sortedData);
-      }
-    } catch (error) {
-      console.error("Error al cargar historial:", error);
-    } finally {
-      setLoadingHistory(false);
-    }
-  };
-
   const handleDelete = async (inc) => {
     if (!window.confirm(`¿Estás seguro de que deseas borrar la incidencia de "${inc["PROPIEDAD"]}"? Esta acción no se puede deshacer.`)) {
       return;
@@ -562,8 +581,10 @@ export default function App() {
         body: JSON.stringify({ action: "delete", rowIndex: inc.rowIndex }),
       });
 
-      // Actualizar localmente eliminando el elemento
-      setIncidencias(prev => prev.filter(item => item.rowIndex !== inc.rowIndex));
+      // Al borrar una fila cambian los índices: releer antes de editar otra.
+      historyLoadedAt.current = 0;
+      setIncidencias([]);
+      await fetchIncidencias(true);
       setStatus({ type: "success", msg: "Incidencia eliminada correctamente." });
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 3000);
@@ -753,6 +774,10 @@ export default function App() {
         body: JSON.stringify(payload),
       });
 
+      historyRequest.current?.abort();
+      historyLoadedAt.current = 0;
+      setIncidencias([]);
+
       setStatus({
         type: "success",
         msg: isEditing ? "¡Incidencia actualizada correctamente!" : "¡Tu reporte ha sido procesado correctamente!"
@@ -822,7 +847,7 @@ export default function App() {
         </button>
         <button
           className={`tab-btn ${activeTab === "historial" ? "active" : ""}`}
-          onClick={() => setActiveTab("historial")}
+          onClick={() => { setActiveTab("historial"); fetchIncidencias(); }}
         >
           <ClipboardList size={18} /> Ver Historial
         </button>
@@ -1239,7 +1264,16 @@ export default function App() {
               </div>
             </div>
 
-            {loadingHistory ? (
+            <button type="button" className="btn btn-secondary" onClick={() => fetchIncidencias(true)} disabled={loadingHistory}>
+              {loadingHistory ? "Actualizando..." : "Actualizar historial"}
+            </button>
+            {historyError && (
+              <div className="glass-card" role="alert">
+                <p>{historyError}</p>
+                <button type="button" className="btn btn-secondary" onClick={() => fetchIncidencias(true)} disabled={loadingHistory}>Reintentar</button>
+              </div>
+            )}
+            {loadingHistory && incidencias.length === 0 ? (
               <div className="glass-card" style={{ textAlign: 'center', padding: '4rem' }}>
                 <Loader2 size={40} className="spin icon-accent" />
                 <p>Cargando historial...</p>
@@ -1248,7 +1282,7 @@ export default function App() {
               // Filtrado
               const filtered = incidencias.filter(inc => {
                 const searchLower = filterPropiedad.toLowerCase();
-                const matchesPropiedad = (inc["PROPIEDAD"] || "").toLowerCase().includes(searchLower);
+                const matchesPropiedad = String(inc["PROPIEDAD"] || "").toLowerCase().includes(searchLower);
                 // Buscamos por la referencia (usando la clave 'ref' que viene del Excel)
                 const matchesRef = refDeIncidencia(inc).toLowerCase().includes(searchLower);
                 const matchesSearch = matchesPropiedad || matchesRef;
@@ -1270,6 +1304,7 @@ export default function App() {
               );
 
               if (filtered.length === 0) {
+                if (historyError && incidencias.length === 0) return null;
                 return (
                   <div className="glass-card" style={{ textAlign: 'center', padding: '4rem' }}>
                     <AlertCircle size={40} className="icon-accent" style={{ opacity: 0.5 }} />
@@ -1294,15 +1329,15 @@ export default function App() {
                               <Eye size={16} />
                             </button>
                           )}
-                          <button className="btn btn-secondary btn-icon-only" title="Editar"
+                          <button className="btn btn-secondary btn-icon-only" title="Editar" disabled={loadingHistory}
                             onClick={() => handleEdit(inc)}>
                             <Pencil size={16} />
                           </button>
-                          <button className="btn btn-danger btn-icon-only" title="Borrar"
+                          <button className="btn btn-danger btn-icon-only" title="Borrar" disabled={loadingHistory}
                             onClick={() => handleDelete(inc)}>
                             <Trash2 size={16} />
                           </button>
-                          <span className={`badge-status ${(inc["ESTADO"] || "pendiente").toLowerCase()}`}>
+                          <span className={`badge-status ${String(inc["ESTADO"] || "pendiente").toLowerCase()}`}>
                             {inc["ESTADO"] || "PENDIENTE"}
                           </span>
                         </div>
