@@ -1460,7 +1460,9 @@ export default function App() {
                 <p>Elige un color en los trimestres que quieras preparar o actualizar. Las carpetas existentes se reutilizan.</p>
                 <div className="admin-quarter-grid">
                   {['Q1', 'Q2', 'Q3', 'Q4'].map((q, i) => {
-                    const folders = adminScan.structure[q].filter(f => f.matchesYear);
+                    // Igual que al subir facturas: la carpeta con el año manda; si no hay, la genérica sin año.
+                    const conAnio = adminScan.structure[q].filter(f => f.matchesYear);
+                    const folders = conAnio.length ? conAnio : adminScan.structure[q].filter(f => f.isGeneric);
                     return <div className="admin-quarter" key={q}>
                       <h4>{['Enero – Marzo', 'Abril – Junio', 'Julio – Septiembre', 'Octubre – Diciembre'][i]}</h4>
                       {folders.length ? folders.map(f => <p key={f.id}><a href={`https://drive.google.com/drive/folders/${encodeURIComponent(f.id)}`} target="_blank" rel="noreferrer">Abrir carpeta</a> · {f.colorLabel}</p>) : <p>Pendiente de crear</p>}

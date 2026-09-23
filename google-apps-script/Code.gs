@@ -440,10 +440,10 @@ function scanDriveStructure(year) {
     if (!quarter) continue;
 
     const hasYearInName = new RegExp("(^|[^0-9])" + yearStr + "([^0-9]|$)").test(name);
-    if (!hasYearInName) continue;
+    const hasAnyYear    = /\d{4}/.test(name);
+    if (!hasYearInName && hasAnyYear) continue; // carpeta de otro año
     const colorHex  = getFolderColorById(folder.getId());
     const colorInfo = matchColorToPalette(colorHex);
-    const hasAnyYear = true;
 
     structure[quarter].push({
       id:          folder.getId(),
@@ -874,10 +874,11 @@ function createQuarterlyStructure(year, colorAssignments) {
   for (const [quarter, colorId] of entries) {
     const cfg = QUARTER_CONFIG[quarter];
     const folderName = cfg.label + " " + ty;
-    const matches = folders.filter(f => {
-      const name = f.getName().trim().toUpperCase();
-      return new RegExp("(^|[^0-9])" + ty + "([^0-9]|$)").test(name) && cfg.keywords.some(k => name.includes(k));
-    });
+    const ofQuarter = folders.filter(f => cfg.keywords.some(k => f.getName().trim().toUpperCase().includes(k)));
+    const withYear  = ofQuarter.filter(f => new RegExp("(^|[^0-9])" + ty + "([^0-9]|$)").test(f.getName()));
+    // Misma regla que findQuarterFolder: sin carpeta con el año se usa la genérica sin año (p. ej. "ABRIL-MAYO-JUNIO"),
+    // si no, crear una nueva dejaría fuera de la app las facturas que ya viven en la genérica.
+    const matches = withYear.length ? withYear : ofQuarter.filter(f => !/\d{4}/.test(f.getName()));
     if (matches.length > 1) throw new Error("Hay varias carpetas para " + quarter + " " + ty + ". Revisa Drive antes de continuar.");
     const qFolder = matches[0] || root.createFolder(folderName);
     getIncidenciasFolder(qFolder);
