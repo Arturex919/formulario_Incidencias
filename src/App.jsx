@@ -619,12 +619,25 @@ export default function App() {
     setForm((prev) => ({ ...prev, [name]: value }));
   };
 
+  // Orden obligatorio: propiedad → nombre → archivo. Evita facturas duplicadas (mismo nombre, propiedad y mes, o segunda subida en la misma incidencia).
+  const nombreFacturaSubida = form.nombreFactura.trim();
+  const facturaRepetida = nombreFacturaSubida && existingRefs.some(r =>
+    String(r.propiedad || "").trim().toUpperCase() === String(form.propiedad || "").trim().toUpperCase() &&
+    String(r.clientName || "").split(/ FAC-/i)[0].trim().toUpperCase() === nombreFacturaSubida.toUpperCase()
+  );
+  const bloqueoSubida =
+    !form.propiedad       ? "Primero elige la propiedad." :
+    !nombreFacturaSubida  ? "Escribe el nombre de la factura antes de subirla." :
+    facturaRepetida       ? `Ya existe una factura "${nombreFacturaSubida}" para ${form.propiedad} en ${selectedMonth}. Cambia el nombre si es otra distinta.` :
+    form.idFactura        ? "Esta incidencia ya tiene una factura subida." :
+    "";
+
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    if (!form.propiedad) {
-      setUploadStatus({ type: 'error', msg: 'Selecciona antes la propiedad: la factura se guarda en su subcarpeta.' });
+    if (bloqueoSubida) {
+      setUploadStatus({ type: 'error', msg: bloqueoSubida });
       e.target.value = "";
       return;
     }
@@ -642,8 +655,7 @@ export default function App() {
     try {
       const currentNextRef = String(nextRef); // SIEMPRE STRING
       const ext = file.name.includes('.') ? file.name.split('.').pop() : 'pdf';
-      const baseName = file.name.replace(/\.[^.]+$/, '');
-      const finalFileName = `${baseName} ${currentNextRef}.${ext}`;
+      const finalFileName = `${nombreFacturaSubida} ${idFactura} ${currentNextRef}.${ext}`;
 
       const reader = new FileReader();
 
@@ -655,7 +667,7 @@ export default function App() {
             fileBase64: base64,
             fileName: file.name,
             invoiceId: idFactura,
-            invoiceName: form.nombreFactura.trim(),
+            invoiceName: nombreFacturaSubida,
             refNumber: String(currentNextRef), // FORZAR STRING para evitar float
             month: selectedMonth,
             year: selectedYear,
@@ -863,10 +875,11 @@ export default function App() {
                     value={form.nombreFactura} onChange={handleChange}
                     placeholder="Ej. Fontanería baño principal" />
                 </div>
-                <label htmlFor="invoice-upload" className={`upload-label ${isUploading ? 'uploading' : ''}`}>
+                <label htmlFor="invoice-upload" className={`upload-label ${isUploading ? 'uploading' : ''}`}
+                  style={bloqueoSubida && !isUploading ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}>
                   {isUploading ? <Loader2 size={24} className="spin" /> : <PlusCircle size={24} />}
                   <div className="upload-text">
-                    <p>{isUploading ? "Procesando..." : "Haz clic o arrastra la factura"}</p>
+                    <p>{isUploading ? "Procesando..." : bloqueoSubida || "Haz clic o arrastra la factura"}</p>
                     <small>Se asignará la referencia {nextRef} automáticamente</small>
                     {form.idFactura && <small className="invoice-id-mini">ID: {form.idFactura}</small>}
                   </div>
@@ -875,7 +888,7 @@ export default function App() {
                     type="file"
                     accept=".pdf,image/*"
                     onChange={handleFileUpload}
-                    disabled={isUploading}
+                    disabled={isUploading || !!bloqueoSubida}
                     style={{ display: 'none' }}
                   />
                 </label>

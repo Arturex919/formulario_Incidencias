@@ -535,7 +535,8 @@ function saveInvoiceToDrive(base64Data, originalFileName, refNumber, month, year
 
   const extMatch    = originalFileName.match(/\.([^.]+)$/);
   const ext         = extMatch ? extMatch[1] : 'pdf';
-  const baseName    = originalFileName.replace(/\.[^.]+$/, '').trim();
+  // El nombre que se escribe en la app es el que se ve en Drive y al buscar; el del archivo original solo si viene vacío.
+  const baseName    = String(invoiceName || "").trim() || originalFileName.replace(/\.[^.]+$/, '').trim();
   // El ID va ANTES del REF en el nombre: refFromFileName necesita el REF al final para no romper el parseo.
   const newFileName = baseName + (invoiceId ? ' ' + invoiceId : '') + ' ' + paddedRef + '.' + ext;
 
