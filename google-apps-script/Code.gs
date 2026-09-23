@@ -463,6 +463,7 @@ function getMonthFiles(month, year) {
     const files = folder.getFiles();
     while (files.hasNext()) {
       const file     = files.next();
+      if (file.isTrashed()) continue; // DriveApp devuelve también lo que está en la papelera
       const fileName = file.getName();
       const nameNoExt = fileName.replace(/\.[^.]+$/, '');
 
@@ -489,10 +490,11 @@ function getMonthFiles(month, year) {
   const propFolders = incidenciasFolder.getFolders();
   while (propFolders.hasNext()) {
     const pf = propFolders.next();
+    if (pf.isTrashed()) continue;
     const monthFolders = pf.getFolders();
     while (monthFolders.hasNext()) {
       const mf = monthFolders.next();
-      if (mf.getName().toUpperCase() === monthUpper) {
+      if (mf.getName().toUpperCase() === monthUpper && !mf.isTrashed()) {
         collectFiles(mf, pf.getName());
       }
     }
@@ -529,7 +531,7 @@ function saveInvoiceToDrive(base64Data, originalFileName, refNumber, month, year
 
   // REF como String corto
   const nextNum   = getNextInvoiceRef(tm, ty);
-  const paddedRef = refNumber
+  const paddedRef = /^\d+$/.test(String(refNumber || ""))
     ? String(refNumber).padStart(3,'0')
     : String(nextNum).padStart(3,'0');
 

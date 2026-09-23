@@ -621,11 +621,15 @@ export default function App() {
 
   // Orden obligatorio: propiedad → nombre → archivo. Evita facturas duplicadas (mismo nombre, propiedad y mes, o segunda subida en la misma incidencia).
   const nombreFacturaSubida = form.nombreFactura.trim();
-  const facturaRepetida = nombreFacturaSubida && existingRefs.some(r =>
-    String(r.propiedad || "").trim().toUpperCase() === String(form.propiedad || "").trim().toUpperCase() &&
+  // Las refs se numeran por mes para todas las propiedades, pero el selector solo enseña las de la propiedad elegida.
+  const refsPropiedad = form.propiedad
+    ? existingRefs.filter(r => String(r.propiedad || "").trim().toUpperCase() === String(form.propiedad).trim().toUpperCase())
+    : existingRefs;
+  const facturaRepetida = nombreFacturaSubida && form.propiedad && refsPropiedad.some(r =>
     String(r.clientName || "").split(/ FAC-/i)[0].trim().toUpperCase() === nombreFacturaSubida.toUpperCase()
   );
   const bloqueoSubida =
+    !/^\d+$/.test(String(nextRef)) ? "Esperando la referencia de Drive..." :
     !form.propiedad       ? "Primero elige la propiedad." :
     !nombreFacturaSubida  ? "Escribe el nombre de la factura antes de subirla." :
     facturaRepetida       ? `Ya existe una factura "${nombreFacturaSubida}" para ${form.propiedad} en ${selectedMonth}. Cambia el nombre si es otra distinta.` :
@@ -1004,16 +1008,16 @@ export default function App() {
                       {nextRef !== "..." && (
                         <option value={nextRef}>⭐ Nueva: {nextRef} (siguiente disponible)</option>
                       )}
-                      {existingRefs.length > 0 && (
-                        <optgroup label={`── ${selectedMonth} ${selectedYear} en Drive (${existingRefs.length}) ──`}>
-                          {existingRefs.map(item => (
+                      {refsPropiedad.length > 0 && (
+                        <optgroup label={`── ${form.propiedad || "Todas"} · ${selectedMonth} ${selectedYear} en Drive (${refsPropiedad.length}) ──`}>
+                          {refsPropiedad.map(item => (
                             <option key={item.fileId || item.ref} value={item.fileId || item.ref}>
                               {item.fullName} {item.ref && item.ref !== "---" ? `(Ref ${item.ref})` : ""}
                             </option>
                           ))}
                         </optgroup>
                       )}
-                      {!loadingRefs && existingRefs.length === 0 && (
+                      {!loadingRefs && refsPropiedad.length === 0 && (
                         <option disabled>Sin archivos en este periodo</option>
                       )}
                     </select>
