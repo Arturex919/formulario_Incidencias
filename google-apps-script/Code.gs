@@ -198,20 +198,37 @@ function getPropertyQuarterFolder(propiedad, quarterKey, year) {
 }
 
 // Crea de antemano Propiedad > Año > (Q1..Q4) para cada propiedad del sistema.
+function adminYear(year) {
+  const value = String(year || TARGET_YEAR).trim();
+  if (!/^(19|20)\d{2}$/.test(value)) throw new Error("Año inválido");
+  return value;
+}
+
 function createPropertyFolders(propiedades, year) {
-  const ty      = year || TARGET_YEAR;
-  const root    = DriveApp.getFolderById(DRIVE_PROPERTIES_ROOT_ID);
-  const created = [];
-
-  (propiedades || []).forEach(p => {
-    const name = String(p || "").trim();
-    if (!name) return;
-    const propFolder = getOrCreate(root, name);
-    const yearFolder = getOrCreate(propFolder, String(ty));
-    Object.values(QUARTER_CONFIG).forEach(cfg => getOrCreate(yearFolder, cfg.label));
-    created.push({ propiedad: name, id: propFolder.getId() });
+  const ty = adminYear(year);
+  if (!Array.isArray(propiedades) || !propiedades.length || propiedades.some(p => typeof p !== 'string' || !p.trim())) {
+    throw new Error("La lista de propiedades está vacía o no es válida");
+  }
+  const names = [...new Map(propiedades.map(p => [p.trim().toUpperCase(), p.trim()])).values()];
+  const root = DriveApp.getFolderById(DRIVE_PROPERTIES_ROOT_ID);
+  // Leer la raíz una sola vez evita recorrer todas las propiedades por cada nombre.
+  const existing = new Map();
+  const folders = root.getFolders();
+  while (folders.hasNext()) {
+    const f = folders.next();
+    existing.set(f.getName().trim().toUpperCase(), f);
+  }
+  const created = names.map(name => {
+    const propFolder = existing.get(name.toUpperCase()) || root.createFolder(name);
+    const yearFolder = getOrCreate(propFolder, ty);
+    const quarters = new Set();
+    const children = yearFolder.getFolders();
+    while (children.hasNext()) quarters.add(children.next().getName().trim().toUpperCase());
+    Object.values(QUARTER_CONFIG).forEach(cfg => {
+      if (!quarters.has(cfg.label)) yearFolder.createFolder(cfg.label);
+    });
+    return { propiedad: name, id: propFolder.getId() };
   });
-
   return { success: true, year: ty, count: created.length, created };
 }
 
@@ -260,21 +277,35 @@ function getManualProperties() {
 
 function addManualProperty(name) {
   const clean = String(name || "").trim();
-  if (!clean) return { success: false, error: "Nombre vacío" };
+  if (!clean || clean.length > 200 || clean.startsWith("=")) return { success: false, error: "Nombre de propiedad inválido" };
   const existing = getManualProperties();
   if (existing.some(n => n.toUpperCase() === clean.toUpperCase())) {
     return { success: true, alreadyExists: true, manual: existing };
   }
   getManualPropertiesSheet().appendRow([clean]);
+  CacheService.getScriptCache().remove("admin_properties_v1");
   return { success: true, manual: existing.concat([clean]) };
 }
 
 // ── Unión: Lodgify + manuales, sin duplicados ─────────────────────────────────
 function getAllProperties() {
-  const lodgify = getLodgifyProperties();
-  const manual  = getManualProperties();
-  const unique  = [...new Set(lodgify.names.concat(manual))].sort((a, b) => a.localeCompare(b));
-  return { error: lodgify.error || null, lodgify: lodgify.names, manual, all: unique };
+  const cache = CacheService.getScriptCache();
+  try {
+    const cached = cache.get("admin_properties_v1");
+    if (cached) return JSON.parse(cached);
+  } catch (_) {}
+  let lodgify = { names: [] };
+  let manual = [];
+  const errors = [];
+  try { lodgify = getLodgifyProperties(); } catch (err) { errors.push("No se pudo consultar Lodgify: " + err.message); }
+  if (lodgify.error) errors.push(lodgify.error);
+  try { manual = getManualProperties(); } catch (err) { errors.push("No se pudieron leer las propiedades manuales: " + err.message); }
+  const unique = [...new Map(lodgify.names.concat(manual).map(n => [n.toUpperCase(), n])).values()].sort((a, b) => a.localeCompare(b));
+  const result = { error: errors.join(" · ") || null, lodgify: lodgify.names, manual, all: unique };
+  if (!result.error) {
+    try { cache.put("admin_properties_v1", JSON.stringify(result), 300); } catch (_) {}
+  }
+  return result;
 }
 
 // ── doGet ─────────────────────────────────────────────────────────────────────
@@ -286,7 +317,6 @@ function doGet(e) {
     if (action === "getMonthFiles")  return jsonResponse({ files: getMonthFiles(e.parameter.month, e.parameter.year) });
     if (action === "getNextRef")     return jsonResponse({ nextRef: String(getNextInvoiceRef(e.parameter.month, e.parameter.year)).padStart(3,'0') });
     if (action === "getAllRefs")     return jsonResponse({ refs: getAllInvoiceRefs(e.parameter.month, e.parameter.year) });
-    if (action === "ensureMonths")   return jsonResponse(ensureMonthFolders(e.parameter.year));
     if (action === "findInvoice" || action === "findInvoiceById") {
       return jsonResponse(findInvoiceSmart(e.parameter.id, e.parameter.name, e.parameter.ref, e.parameter.month, e.parameter.year, e.parameter.propiedad));
     }
@@ -339,16 +369,16 @@ function doPost(e) {
       return jsonResponse(saveInvoiceToDrive(data.fileBase64, data.fileName, data.refNumber || null, data.month || null, data.year || null, data.propiedad || null, data.invoiceId || null, data.invoiceName || null));
     }
 
-    if (data.action === "createYearStructure") {
-      return jsonResponse(createQuarterlyStructure(data.year, data.colorAssignments));
-    }
-
-    if (data.action === "createPropertyFolders") {
-      return jsonResponse(createPropertyFolders(data.propiedades, data.year));
-    }
-
-    if (data.action === "addManualProperty") {
-      return jsonResponse(addManualProperty(data.name));
+    if (["createYearStructure", "createPropertyFolders", "addManualProperty"].includes(data.action)) {
+      const lock = LockService.getScriptLock();
+      if (!lock.tryLock(1000)) return jsonResponse({ success: false, error: "Hay otra operación de Administración en curso. Espera y vuelve a intentarlo." });
+      try {
+        if (data.action === "createYearStructure") return jsonResponse(createQuarterlyStructure(data.year, data.colorAssignments));
+        if (data.action === "createPropertyFolders") return jsonResponse(createPropertyFolders(data.propiedades, data.year));
+        return jsonResponse(addManualProperty(data.name));
+      } finally {
+        lock.releaseLock();
+      }
     }
 
     if (data.action === "delete") {
@@ -388,13 +418,13 @@ function doPost(e) {
     return ContentService.createTextOutput("SUCCESS").setMimeType(ContentService.MimeType.TEXT);
 
   } catch (error) {
-    return ContentService.createTextOutput("ERROR: " + error.toString()).setMimeType(ContentService.MimeType.TEXT);
+    return jsonResponse({ success: false, error: error.toString() });
   }
 }
 
 // ── ESCANEO DE ESTRUCTURA DRIVE ───────────────────────────────────────────────
 function scanDriveStructure(year) {
-  const yearStr = year || TARGET_YEAR;
+  const yearStr = adminYear(year);
   const root    = DriveApp.getFolderById(DRIVE_ROOT_FOLDER_ID);
   const folders = root.getFolders();
   const structure = { Q1: [], Q2: [], Q3: [], Q4: [] };
@@ -409,17 +439,18 @@ function scanDriveStructure(year) {
     }
     if (!quarter) continue;
 
+    const hasYearInName = new RegExp("(^|[^0-9])" + yearStr + "([^0-9]|$)").test(name);
+    if (!hasYearInName) continue;
     const colorHex  = getFolderColorById(folder.getId());
     const colorInfo = matchColorToPalette(colorHex);
-    const hasYearInName = name.includes(yearStr);
-    const hasAnyYear    = /\d{4}/.test(name);
+    const hasAnyYear = true;
 
     structure[quarter].push({
       id:          folder.getId(),
       name:        folder.getName(),
       color:       colorInfo.id,
       colorHex:    colorInfo.hex,
-      colorLabel:  colorInfo.label,
+      colorLabel:  colorHex ? colorInfo.label : "Color no disponible",
       matchesYear: hasYearInName,
       isGeneric:   !hasAnyYear
     });
@@ -429,10 +460,10 @@ function scanDriveStructure(year) {
   const availability = {};
   for (const q of ["Q1","Q2","Q3","Q4"]) {
     const yearFolders = structure[q].filter(f => f.matchesYear || f.isGeneric);
-    const used = yearFolders.map(f => f.color).filter(c => c !== "GRAY");
+    const used = [...new Set(yearFolders.filter(f => f.colorLabel !== "Color no disponible").map(f => f.color))];
     availability[q] = {
       used,
-      available: allColorIds.filter(c => c !== "GRAY" && !used.includes(c)),
+      available: allColorIds.filter(c => !used.includes(c)),
       folders: yearFolders
     };
   }
@@ -830,58 +861,41 @@ function getAllInvoiceRefs(month, year) {
 
 // ── CREAR ESTRUCTURA TRIMESTRAL (con colores) ─────────────────────────────────
 function createQuarterlyStructure(year, colorAssignments) {
-  const root    = DriveApp.getFolderById(DRIVE_ROOT_FOLDER_ID);
+  const ty = adminYear(year);
+  if (!colorAssignments || Array.isArray(colorAssignments) || typeof colorAssignments !== 'object') throw new Error("Selecciona los trimestres y sus colores");
+  const entries = Object.entries(colorAssignments);
+  if (!entries.length || entries.some(([q, c]) => !QUARTER_CONFIG[q] || !COLOR_PALETTE.some(color => color.id === c))) throw new Error("Trimestre o color inválido");
+  const root = DriveApp.getFolderById(DRIVE_ROOT_FOLDER_ID);
+  const folders = [];
+  const children = root.getFolders();
+  while (children.hasNext()) folders.push(children.next());
   const created = [];
-
-  for (const [quarter, colorId] of Object.entries(colorAssignments)) {
+  const warnings = [];
+  for (const [quarter, colorId] of entries) {
     const cfg = QUARTER_CONFIG[quarter];
-    if (!cfg) continue;
-    const folderName = cfg.label + " " + year;
-    
-    let qFolder = null;
-    let statusMsg = "";
-    
-    const folders = root.getFolders();
-    while (folders.hasNext()) {
-      const f = folders.next();
-      if (f.getName() === folderName) {
-        qFolder = f;
-        statusMsg = "ya existia (color actualizado)";
-        break;
-      }
-    }
-
-    if (!qFolder) {
-      qFolder = root.createFolder(folderName);
-      // Crear subcarpetas de meses automáticamente solo si es nueva
-      cfg.monthNames.forEach(m => qFolder.createFolder(m));
-      statusMsg = "creada con meses";
-    }
-
-    // Si ya existía, nos aseguramos de que tenga los meses (sin duplicar)
-    if (statusMsg.includes("ya existia")) {
-      cfg.monthNames.forEach(m => getOrCreate(qFolder, m));
-    }
-
-    // Asignar/Actualizar color vía Drive API v2 o v3 si está disponible
+    const folderName = cfg.label + " " + ty;
+    const matches = folders.filter(f => {
+      const name = f.getName().trim().toUpperCase();
+      return new RegExp("(^|[^0-9])" + ty + "([^0-9]|$)").test(name) && cfg.keywords.some(k => name.includes(k));
+    });
+    if (matches.length > 1) throw new Error("Hay varias carpetas para " + quarter + " " + ty + ". Revisa Drive antes de continuar.");
+    const qFolder = matches[0] || root.createFolder(folderName);
+    getIncidenciasFolder(qFolder);
+    // Propiedad/Mes se crea al subir la factura; no crear el antiguo Trimestre/Mes.
+    let colorUpdated = false;
     try {
-      if (typeof Drive !== 'undefined' && Drive.Files) {
-        const hex = COLOR_PALETTE.find(c => c.id === colorId)?.hex || "#9AA0A6";
-        const resource = { folderColorRgb: hex };
-        const fileId = qFolder.getId();
-        
-        if (Drive.Files.patch) {
-          Drive.Files.patch(resource, fileId);
-        } else if (Drive.Files.update) {
-          Drive.Files.update(resource, fileId);
-        }
-      }
-    } catch (e) {}
-
-    created.push({ quarter, folderName, colorId, status: statusMsg, id: qFolder.getId() });
+      if (typeof Drive === 'undefined' || !Drive.Files) throw new Error("servicio de colores no disponible");
+      const resource = { folderColorRgb: COLOR_PALETTE.find(c => c.id === colorId).hex };
+      if (Drive.Files.patch) Drive.Files.patch(resource, qFolder.getId());
+      else if (Drive.Files.update) Drive.Files.update(resource, qFolder.getId());
+      else throw new Error("servicio de colores no disponible");
+      colorUpdated = true;
+    } catch (_) {
+      warnings.push(quarter + ": carpeta preparada, pero no se pudo aplicar el color. Puedes cambiarlo en Drive.");
+    }
+    created.push({ quarter, folderName: qFolder.getName(), colorId, colorUpdated, status: matches.length ? "reutilizada" : "creada", id: qFolder.getId() });
   }
-
-  return { success: true, year, created };
+  return { success: true, year: ty, created, warnings };
 }
 
 // ── MIGRAR FACTURAS DEL ESQUEMA VIEJO (Trimestre/Mes/Propiedad) AL NUEVO (Trimestre/INCIDENCIAS/Propiedad/Mes) ──
@@ -928,27 +942,4 @@ function migrateOldInvoicesToIncidencias(year) {
   });
 
   return { success: true, year: ty, count: moved.length, moved };
-}
-
-// ── ENSURE MONTH FOLDERS (para trimestres existentes) ────────────────────────
-// Crea las subcarpetas de mes en todos los trimestres del año indicado.
-function ensureMonthFolders(year) {
-  const ty      = year || TARGET_YEAR;
-  const results = [];
-
-  for (const [qKey, cfg] of Object.entries(QUARTER_CONFIG)) {
-    const qFolder = findQuarterFolder(qKey, ty);
-    if (!qFolder) {
-      results.push({ quarter: qKey, status: "no encontrada" });
-      continue;
-    }
-    const created = [];
-    cfg.monthNames.forEach(m => {
-      const folder = getOrCreate(qFolder, m);
-      created.push({ month: m, id: folder.getId() });
-    });
-    results.push({ quarter: qKey, folderName: qFolder.getName(), status: "ok", months: created });
-  }
-
-  return { success: true, year: ty, results };
 }
