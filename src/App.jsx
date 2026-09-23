@@ -1559,30 +1559,98 @@ export default function App() {
             </div>
 
             <div className="help-section">
-              <h3><PlusCircle size={16} /> Nuevo Reporte</h3>
+              <h3><CheckCircle size={16} /> Resumen rápido (el orden importa)</h3>
               <ol>
-                <li>Rellena responsable, propiedad, clasificación y descripción (los campos con * son obligatorios).</li>
-                <li>Si hay factura de por medio: elige primero la propiedad, luego el mes/año del periodo al que pertenece la factura, y sube el archivo. La referencia (REF) se asigna sola.</li>
-                <li>Guarda con "Enviar". La factura y la incidencia se guardan por separado: si subes la factura pero no llegas a guardar el formulario, la incidencia no queda en el historial aunque el archivo ya esté en Drive.</li>
+                <li>Elige el <strong>mes y año</strong> de la factura en "Ref. (Nº) — Buscar por periodo".</li>
+                <li>Elige la <strong>Propiedad</strong> (campo con buscador, más abajo en el formulario).</li>
+                <li>Escribe el <strong>Nombre de la factura</strong> (arriba, en "Carga de Factura").</li>
+                <li>Sube el archivo en "Haz clic o arrastra la factura". Espera al mensaje verde ✅.</li>
+                <li>Rellena el resto (Responsable, Fecha, Clasificación, Descripción…) y pulsa <strong>"Enviar Incidencia"</strong>.</li>
+              </ol>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
+                Si no hay factura, sáltate los pasos 1 a 4: basta con el formulario y "Enviar Incidencia".
+              </p>
+            </div>
+
+            <div className="help-section">
+              <h3><PlusCircle size={16} /> Nuevo Reporte: el formulario</h3>
+              <ol>
+                <li><strong>Obligatorios (*):</strong> Responsable (quién reporta), Fecha (cuándo pasó la incidencia), Propiedad, Clasificación y Descripción. Si falta alguno, no se envía.</li>
+                <li><strong>Propiedad:</strong> haz clic y escribe parte del nombre, el código (p. ej. 026) o el encargado; elige de la lista. Salen las de Lodgify más las añadidas a mano en Administración. Si no aparece, pide que la añadan (ver Administración).</li>
+                <li><strong>Clasificación "OTRO":</strong> aparece una casilla para escribir el tipo.</li>
+                <li><strong>Gestión y Resolución (opcional):</strong> Operario, Proveedor, Mano de Obra (€), Estado, Acción tomada y Plan de acción futuro. Se pueden rellenar ahora o más tarde editando la incidencia.</li>
+                <li><strong>"Cancelar / Limpiar"</strong> vacía todo el formulario (no borra nada ya guardado ni facturas ya subidas).</li>
+                <li>La factura y la incidencia se guardan <strong>por separado</strong>: si subes la factura pero no pulsas "Enviar Incidencia", el archivo queda en Drive pero la incidencia no aparece en el Historial.</li>
+              </ol>
+            </div>
+
+            <div className="help-section">
+              <h3><Truck size={16} /> Subir una factura</h3>
+              <ol>
+                <li><strong>Mes y año:</strong> son los del periodo al que pertenece la factura; deciden en qué carpeta de Drive se guarda. Cámbialos <strong>antes</strong> de subir.</li>
+                <li><strong>Nombre de la factura:</strong> ponle un nombre claro que luego sepas buscar, p. ej. "Tapa WC Vistamar IV" o "Mando garaje Acapulco". Ese nombre es el que tendrá el archivo en Drive y el que verás en el desplegable de referencias. Evita nombres genéricos como "prueba" o "factura".</li>
+                <li>El archivo se guarda en Drive así: <code>Nombre FAC-XXXX-XXXX 019.pdf</code> — tu nombre, un código único (ID) y la referencia (REF) del mes. No hace falta renombrar nada.</li>
+                <li><strong>REF:</strong> se asigna sola ("Se asignará la referencia 019 automáticamente"). Es un número correlativo por mes, compartido entre todas las propiedades.</li>
+                <li>Formatos: PDF o imagen (JPG, PNG). Mientras sube verás "Procesando..."; no cierres la página hasta ver el mensaje verde "✅ Factura subida".</li>
+                <li><strong>Una factura por incidencia.</strong> Si necesitas otra, crea otra incidencia.</li>
+              </ol>
+            </div>
+
+            <div className="help-section">
+              <h3><ClipboardList size={16} /> Usar una factura que ya está en Drive</h3>
+              <ol>
+                <li>Si la factura ya se subió (por ejemplo, desde otra incidencia), no la subas de nuevo: elige mes/año y propiedad, y ábrela en el desplegable <strong>"— Seleccionar referencia o archivo —"</strong>.</li>
+                <li>El desplegable solo enseña las facturas de la <strong>propiedad elegida</strong> en ese mes. Si no eliges propiedad, enseña las de todas.</li>
+                <li>"⭐ Nueva: 019 (siguiente disponible)" es la próxima referencia libre; úsala solo si vas a subir una factura nueva.</li>
+                <li>Debajo aparece "📄 Archivo: …" con el nombre del archivo elegido, para que confirmes que es el correcto.</li>
               </ol>
             </div>
 
             <div className="help-section">
               <h3><ClipboardList size={16} /> Ver Historial</h3>
               <ol>
-                <li>Busca por nombre de alojamiento o referencia de factura en la barra de búsqueda.</li>
-                <li>Filtra por mes con el desplegable de al lado. El filtro usa la <strong>fecha de la incidencia</strong>, no el mes en que se subió la factura — si registras hoy una incidencia de hace meses, aparecerá en el mes de esa fecha, no en el mes actual.</li>
-                <li>El icono del ojo abre la vista previa de la factura. Si no la encuentra en el mes de la incidencia, busca sola en el resto de meses del año antes de darla por no encontrada.</li>
-                <li>Lápiz edita, papelera borra (pide confirmación).</li>
+                <li>Busca por nombre de alojamiento en "Buscar por alojamiento...".</li>
+                <li>Filtra por mes con el desplegable de al lado. El filtro usa la <strong>fecha de la incidencia</strong>, no el mes en que se subió la factura: una incidencia de junio con factura de septiembre sale en junio.</li>
+                <li><Eye size={14} /> <strong>Ver factura</strong> abre la vista previa. Solo aparece si la incidencia tiene REF o ID de factura. Si no la encuentra en el mes de la incidencia, la busca sola en el resto de meses del año (por eso el selector "Mes" de la vista previa puede cambiar solo).</li>
+                <li><Pencil size={14} /> <strong>Editar</strong> abre la incidencia en el formulario; cambia lo necesario y pulsa "Guardar Cambios".</li>
+                <li><Trash2 size={14} /> <strong>Borrar</strong> pide confirmación y elimina la fila del historial. <strong>No borra la factura de Drive</strong>; si también sobra, bórrala a mano en Drive.</li>
+                <li>El historial se guarda en memoria unos minutos para que cargue rápido. Lo que se cambia desde la app se ve al momento; lo que se cambia <strong>a mano en la hoja de cálculo</strong> puede tardar hasta 5 minutos en verse.</li>
               </ol>
             </div>
 
             <div className="help-section">
               <h3><Wrench size={16} /> Administración</h3>
               <ol>
-                <li>"Escanear Drive" muestra qué colores de carpeta están libres/ocupados por trimestre para el año elegido.</li>
-                <li>"Crear carpetas de propiedades" prepara en Drive la estructura Propiedad / Año / Trimestre para todas las propiedades activas.</li>
-                <li>Puedes añadir a mano una propiedad que no esté en Lodgify.</li>
+                <li><strong>"Añadir propiedad":</strong> para alojamientos que no están en Lodgify. Escribe el nombre y pulsa el botón (o Enter). Aparecerá en el buscador de Propiedad.</li>
+                <li><strong>"Escanear Drive":</strong> elige el año y muestra, por trimestre, qué colores de carpeta están ocupados o libres.</li>
+                <li><strong>"Crear Estructura en Drive":</strong> marca un color libre para cada trimestre y pulsa el botón; crea las carpetas del trimestre con sus meses. Si ya existían, solo actualiza el color.</li>
+                <li><strong>"Crear carpetas de propiedades":</strong> crea en la carpeta espejo Propiedad / Año / Trimestre para todas las propiedades. No borra nada.</li>
+                <li><strong>Cada enero:</strong> (1) crear en la hoja de cálculo la pestaña "INCIDENCIA {new Date().getFullYear() + 1}" con las mismas columnas; (2) aquí, elegir el año nuevo, escanear y "Crear Estructura en Drive". Sin eso, no se podrán subir facturas del año nuevo.</li>
+              </ol>
+            </div>
+
+            <div className="help-section">
+              <h3><FileText size={16} /> Dónde se guarda cada cosa</h3>
+              <ol>
+                <li><strong>Incidencias:</strong> hoja de cálculo "PAGO A PROPIETARIOS NUEVO", pestaña "INCIDENCIA {new Date().getFullYear()}" (una fila por incidencia).</li>
+                <li><strong>Facturas:</strong> en Drive, <code>PERIODO &lt;TRIMESTRE&gt; &lt;AÑO&gt; / INCIDENCIAS / &lt;PROPIEDAD&gt; / &lt;MES&gt;</code>. Ej.: PERIODO JULIO-AGOSTO-SEPTIEMBRE {new Date().getFullYear()} / INCIDENCIAS / APARTAMENTO OROPESA VISTAMAR IV / SEPTIEMBRE.</li>
+                <li><strong>Copia espejo:</strong> cada factura se copia también en <code>Facturas-Incidencias / &lt;Propiedad&gt; / &lt;Año&gt; / &lt;Trimestre&gt;</code>. Si borras una factura a mano, bórrala en los dos sitios.</li>
+              </ol>
+            </div>
+
+            <div className="help-section">
+              <h3><HelpCircle size={16} /> Problemas frecuentes</h3>
+              <ol>
+                <li><strong>"Esperando la referencia de Drive..."</strong> — la app aún está pidiendo el número de REF. Espera unos segundos. Si no cambia, recarga la página.</li>
+                <li><strong>"Primero elige la propiedad."</strong> — baja al campo Propiedad del formulario y elige una; después vuelve a la zona de la factura.</li>
+                <li><strong>"Escribe el nombre de la factura antes de subirla."</strong> — rellena "Nombre de la factura".</li>
+                <li><strong>"Ya existe una factura "…" para … en …"</strong> — esa propiedad ya tiene en ese mes una factura con el mismo nombre. Si es la misma, no la subas: elígela en el desplegable de referencias. Si es otra distinta, cámbiale el nombre (p. ej. añade "2").</li>
+                <li><strong>"Esta incidencia ya tiene una factura subida."</strong> — solo se permite una factura por incidencia. Pulsa "Cancelar / Limpiar" y empieza otra incidencia si hace falta.</li>
+                <li><strong>"⚠️ Drive no confirma la factura …"</strong> — la subida no se pudo comprobar. Revisa en Administración → "Escanear Drive" que exista la carpeta del trimestre para ese año. Si existe, espera un minuto, recarga la página y mira en el desplegable de referencias si la factura aparece antes de volver a subirla (para no duplicarla).</li>
+                <li><strong>No sale el botón "Ver factura" en el Historial</strong> — esa incidencia no tiene REF ni ID de factura guardados. Edítala y elige la factura en el desplegable de referencias.</li>
+                <li><strong>La vista previa muestra otra factura o ninguna</strong> — comprueba que la incidencia tiene la propiedad y la REF correctas (Editar). La búsqueda usa ID, nombre, propiedad y REF.</li>
+                <li><strong>Guardar tarda</strong> — es normal que "Enviar Incidencia" tarde algunos segundos: la hoja de cálculo es grande. No pulses el botón dos veces.</li>
+                <li><strong>El historial sale vacío o con error</strong> — recarga la página. Si sigue igual, avisa al responsable técnico.</li>
               </ol>
             </div>
 
