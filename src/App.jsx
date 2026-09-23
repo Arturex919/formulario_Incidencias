@@ -24,6 +24,39 @@ const MONTHS = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", 
 
 const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwhQ4teH9bNt6HVNgYrKi_sfZ9HvujWQppcLaLIp80P2LbcpHPiNPcu6mWFU6eIUXcW/exec";
 
+// Las acciones administrativas necesitan una respuesta legible antes de confirmar éxito.
+async function requestAdmin(action, params = {}, write = false, signal) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), write ? 180000 : 60000);
+  const abort = () => controller.abort();
+  signal?.addEventListener('abort', abort, { once: true });
+  try {
+    const query = new URLSearchParams({ action, ...params });
+    const response = await fetch(write ? GOOGLE_SCRIPT_URL : `${GOOGLE_SCRIPT_URL}?${query}`, {
+      signal: controller.signal,
+      ...(write ? { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action, ...params }) } : {})
+    });
+    if (!response.ok) throw new Error(`Error de conexión (${response.status}).`);
+    const text = await response.text();
+    let data;
+    try { data = JSON.parse(text); } catch {
+      throw new Error(text.startsWith('ERROR:') ? text.slice(6).trim() : 'El servidor no devolvió una respuesta válida.');
+    }
+    if (!data || typeof data !== 'object') throw new Error('Respuesta inesperada del servidor.');
+    if (data.success === false || (data.error && !Array.isArray(data.all))) throw new Error(data.error || 'La operación no se completó.');
+    if (write && data.success !== true) throw new Error('El servidor no confirmó la operación.');
+    return data;
+  } catch (error) {
+    if (controller.signal.aborted && !signal?.aborted) {
+      throw new Error(write ? 'No se pudo confirmar la operación a tiempo. Actualiza y revisa Drive antes de repetirla.' : 'La consulta está tardando demasiado. Vuelve a intentarlo.');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    signal?.removeEventListener('abort', abort);
+  }
+}
+
 // ─── Estado inicial del formulario ────────────────────────────────────────────
 const FORM_INICIAL = {
   responsable: "",
@@ -331,10 +364,11 @@ export default function App() {
   const [creatingStructure, setCreatingStructure] = useState(false);
   const [createResult, setCreateResult] = useState(null);
 
-  // Selector Mensual de Facturas Drive
-  const [monthFiles, setMonthFiles] = useState([]);
-  const [loadingMonthFiles, setLoadingMonthFiles] = useState(false);
-  const [selectedAdminMonth, setSelectedAdminMonth] = useState(MONTHS[new Date().getMonth()]);
+  const adminScanCache = useRef({ year: null, at: 0 });
+  const adminScanRequest = useRef(null);
+  const adminPropertiesCache = useRef(0);
+  const adminPropertiesRequest = useRef(false);
+  const adminMutation = useRef(false);
 
   // ── Tema ──────────────────────────────────────────────────────────────────
   const [darkMode, setDarkMode] = useState(() => {
@@ -387,7 +421,6 @@ export default function App() {
 
   useEffect(() => {
     if (activeTab === "nuevo") fetchNextRef(selectedMonth, selectedYear);
-    if (activeTab === "administracion") { fetchScanStructure(selectedAdminYear); fetchAdminProperties(); }
   }, [activeTab]);
 
   useEffect(() => {
@@ -422,148 +455,120 @@ export default function App() {
     }
   };
 
-  const fetchScanStructure = async (year) => {
+  const fetchScanStructure = async (year, force = false) => {
+    if (!force && adminScanCache.current.year === year && Date.now() - adminScanCache.current.at < 60000) return;
+    if (!force && adminScanRequest.current?.year === year) return;
+    adminScanRequest.current?.controller.abort();
+    const controller = new AbortController();
+    adminScanRequest.current = { year, controller };
     setLoadingAdmin(true);
     setAdminError(null);
+    setAdminScan(null);
+    setColorAssignments({});
     try {
-      const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=scanStructure&year=${year}`);
-      const data = await res.json();
-      if (data && data.error) {
-        setAdminError(data.error);
-        setAdminScan(null);
-      } else if (data && data.structure && data.availability && data.colorPalette) {
-        setAdminScan(data);
-        setColorAssignments({});
-      } else {
-        // Respuesta inesperada — mostramos error amigable
-        setAdminError('Respuesta inesperada de Drive. Verifica permisos y estructura de carpetas.');
-        setAdminScan(null);
+      const data = await requestAdmin('scanStructure', { year }, false, controller.signal);
+      if (String(data.year) !== String(year) || !Array.isArray(data.colorPalette) ||
+          !['Q1', 'Q2', 'Q3', 'Q4'].every(q => Array.isArray(data.structure?.[q]))) {
+        throw new Error('El escaneo de Drive está incompleto. Vuelve a intentarlo.');
       }
+      if (controller.signal.aborted) return;
+      setAdminScan(data);
+      adminScanCache.current = { year, at: Date.now() };
     } catch (err) {
-      console.error('Error escaneo Drive:', err);
-      setAdminError('Error de conexión con Drive: ' + err.message);
-      setAdminScan(null);
+      if (!controller.signal.aborted) setAdminError(err.message);
     } finally {
-      setLoadingAdmin(false);
+      if (adminScanRequest.current?.controller === controller) {
+        adminScanRequest.current = null;
+        setLoadingAdmin(false);
+      }
     }
   };
 
-  const fetchMonthFiles = async (month, year) => {
-    setLoadingMonthFiles(true);
-    try {
-      const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getMonthFiles&month=${month}&year=${year}`);
-      const data = await res.json();
-      setMonthFiles(Array.isArray(data.files) ? data.files : []);
-    } catch (err) {
-      console.error('Error al obtener archivos del mes:', err);
-    } finally {
-      setLoadingMonthFiles(false);
-    }
-  };
+  useEffect(() => () => adminScanRequest.current?.controller.abort(), []);
 
   const handleCreateStructure = async () => {
-    if (Object.keys(colorAssignments).length === 0) return;
+    if (adminMutation.current || !Object.keys(colorAssignments).length) return;
+    adminMutation.current = true;
     setCreatingStructure(true);
     setCreateResult(null);
     try {
-      const res = await fetch(GOOGLE_SCRIPT_URL, {
-        method: 'POST',
-        mode: 'no-cors',
-        body: JSON.stringify({ action: 'createYearStructure', year: selectedAdminYear, colorAssignments })
-      });
-      setCreateResult({ success: true, msg: `✅ Estructura ${selectedAdminYear} creada en Drive (con subcarpetas de meses).` });
-      setTimeout(() => fetchScanStructure(selectedAdminYear), 2500);
+      const data = await requestAdmin('createYearStructure', { year: selectedAdminYear, colorAssignments }, true);
+      setCreateResult({ success: true, msg: `Estructura de ${selectedAdminYear} preparada. ${(data.warnings || []).join(' ')}` });
+      await fetchScanStructure(selectedAdminYear, true);
     } catch (err) {
-      setCreateResult({ success: false, msg: '❌ Error: ' + err.message });
+      setCreateResult({ success: false, msg: err.message });
     } finally {
+      adminMutation.current = false;
       setCreatingStructure(false);
     }
   };
 
-  const [ensuringMonths, setEnsuringMonths] = useState(false);
-  const [ensureResult, setEnsureResult] = useState(null);
-
-  const handleEnsureMonths = async () => {
-    setEnsuringMonths(true);
-    setEnsureResult(null);
-    try {
-      const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=ensureMonths&year=${selectedAdminYear}`);
-      const data = await res.json();
-      if (data.success) {
-        const summary = data.results.map(r => `${r.quarter}: ${r.status}`).join(' | ');
-        setEnsureResult({ success: true, msg: `✅ Meses verificados: ${summary}` });
-      } else {
-        setEnsureResult({ success: false, msg: '⚠️ ' + JSON.stringify(data) });
-      }
-    } catch (err) {
-      setEnsureResult({ success: false, msg: '❌ Error: ' + err.message });
-    } finally {
-      setEnsuringMonths(false);
-    }
-  };
-
-  // Propiedades para creación de carpetas: Lodgify (fuente real) + añadidas a mano
   const [adminProperties, setAdminProperties] = useState({ all: [], lodgify: [], manual: [] });
   const [loadingAdminProps, setLoadingAdminProps] = useState(false);
   const [adminPropsError, setAdminPropsError] = useState(null);
   const [newPropertyName, setNewPropertyName] = useState("");
   const [addingProperty, setAddingProperty] = useState(false);
+  const [propertyResult, setPropertyResult] = useState(null);
 
-  const fetchAdminProperties = async () => {
+  const fetchAdminProperties = async (force = false) => {
+    if (adminPropertiesRequest.current || (!force && Date.now() - adminPropertiesCache.current < 300000)) return;
+    adminPropertiesRequest.current = true;
     setLoadingAdminProps(true);
     setAdminPropsError(null);
     try {
-      const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getProperties`);
-      const data = await res.json();
-      setAdminProperties({ all: data.all || [], lodgify: data.lodgify || [], manual: data.manual || [] });
-      if (data.error) setAdminPropsError(data.error);
+      const data = await requestAdmin('getProperties');
+      if (!['all', 'lodgify', 'manual'].every(k => Array.isArray(data[k]) && data[k].every(n => typeof n === 'string'))) {
+        throw new Error('La lista de propiedades está incompleta. Vuelve a intentarlo.');
+      }
+      setAdminProperties(data);
+      setAdminPropsError(data.error || null);
+      adminPropertiesCache.current = data.error ? 0 : Date.now();
     } catch (err) {
-      setAdminPropsError('Error de conexión con Lodgify: ' + err.message);
+      setAdminPropsError(err.message);
     } finally {
+      adminPropertiesRequest.current = false;
       setLoadingAdminProps(false);
     }
   };
 
   const handleAddProperty = async () => {
     const name = newPropertyName.trim();
-    if (!name) return;
+    if (!name || adminMutation.current || loadingAdminProps) return;
+    adminMutation.current = true;
     setAddingProperty(true);
+    setPropertyResult(null);
     try {
-      await fetch(GOOGLE_SCRIPT_URL, {
-        method: 'POST',
-        mode: 'no-cors',
-        body: JSON.stringify({ action: 'addManualProperty', name })
-      });
+      const data = await requestAdmin('addManualProperty', { name }, true);
+      if (!Array.isArray(data.manual) || !data.manual.every(n => typeof n === 'string')) throw new Error('No se pudo verificar la lista de propiedades. Actualízala antes de repetir.');
+      setAdminProperties(prev => ({ ...prev, manual: data.manual, all: [...new Map([...prev.lodgify, ...data.manual].map(n => [n.toUpperCase(), n])).values()].sort() }));
+      adminPropertiesCache.current = 0;
       setNewPropertyName("");
-      await fetchAdminProperties();
+      setPropertyResult({ success: true, msg: data.alreadyExists ? 'La propiedad ya estaba registrada.' : 'Propiedad añadida. Ya puedes elegirla en Nuevo Reporte.' });
     } catch (err) {
-      setAdminPropsError('Error al añadir propiedad: ' + err.message);
+      setPropertyResult({ success: false, msg: err.message });
     } finally {
+      adminMutation.current = false;
       setAddingProperty(false);
     }
   };
 
   const [creatingPropFolders, setCreatingPropFolders] = useState(false);
   const [propFoldersResult, setPropFoldersResult] = useState(null);
+  const adminBusy = creatingStructure || creatingPropFolders || addingProperty;
 
   const handleCreatePropertyFolders = async () => {
-    if (adminProperties.all.length === 0) return;
+    if (adminMutation.current || loadingAdminProps || adminPropsError || !adminProperties.all.length) return;
+    adminMutation.current = true;
     setCreatingPropFolders(true);
     setPropFoldersResult(null);
     try {
-      await fetch(GOOGLE_SCRIPT_URL, {
-        method: 'POST',
-        mode: 'no-cors',
-        body: JSON.stringify({
-          action: 'createPropertyFolders',
-          year: selectedAdminYear,
-          propiedades: adminProperties.all
-        })
-      });
-      setPropFoldersResult({ success: true, msg: `✅ Carpetas creadas en Facturas-Incidencias para ${adminProperties.all.length} propiedades (${selectedAdminYear}).` });
+      const data = await requestAdmin('createPropertyFolders', { year: selectedAdminYear, propiedades: adminProperties.all }, true);
+      if (!Number.isInteger(data.count)) throw new Error('No se pudo verificar el número de propiedades. Revisa Drive antes de repetir.');
+      setPropFoldersResult({ success: true, msg: `Carpetas preparadas para ${data.count} propiedades en ${selectedAdminYear}.` });
     } catch (err) {
-      setPropFoldersResult({ success: false, msg: '❌ Error: ' + err.message });
+      setPropFoldersResult({ success: false, msg: err.message });
     } finally {
+      adminMutation.current = false;
       setCreatingPropFolders(false);
     }
   };
@@ -853,7 +858,7 @@ export default function App() {
         </button>
         <button
           className={`tab-btn ${activeTab === "administracion" ? "active" : ""}`}
-          onClick={() => setActiveTab("administracion")}
+          onClick={() => { setActiveTab("administracion"); fetchScanStructure(selectedAdminYear); fetchAdminProperties(); }}
         >
           <Wrench size={18} /> Administración
         </button>
@@ -1066,7 +1071,7 @@ export default function App() {
                         className="prop-search-input"
                         placeholder="Buscar por REF o Nombre..."
                         value={showPropDropdown ? searchPropiedad : (form.propiedad || "")}
-                        onFocus={() => { setShowPropDropdown(true); setSearchPropiedad(""); }}
+                        onFocus={() => { setShowPropDropdown(true); setSearchPropiedad(""); fetchAdminProperties(); }}
                         onChange={(e) => setSearchPropiedad(e.target.value)}
                         onBlur={() => setTimeout(() => setShowPropDropdown(false), 200)}
                       />
@@ -1081,10 +1086,12 @@ export default function App() {
                           animate={{ opacity: 1, y: 0 }}
                           exit={{ opacity: 0, y: -10 }}
                         >
-                          {loadingPropiedades ? (
+                          {loadingPropiedades || loadingAdminProps ? (
                             <div className="dropdown-item disabled">Cargando propiedades...</div>
                           ) : (() => {
-                            const filtered = propiedadesLocales.filter(p => {
+                            const options = new Map(adminProperties.all.map(name => [name.toUpperCase(), { name, ref: '', encargado: '' }]));
+                            propiedadesLocales.forEach(p => options.set(p.name.toUpperCase(), p));
+                            const filtered = [...options.values()].filter(p => {
                               const search = searchPropiedad.toLowerCase();
                               const name = (p.name || "").toLowerCase();
                               const ref = (p.ref || "").toLowerCase();
@@ -1428,125 +1435,79 @@ export default function App() {
         {/* ── TAB: ADMINISTRACIÓN ── */}
         {activeTab === "administracion" && (
           <motion.div key="admin" className="glass-card form-card" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-
-            {/* -- Escaneo de estructura -- */}
-            <div className="form-section-title">
-              <Wrench size={20} className="icon-accent" />
-              <span>Administración de Estructura Drive por Colores</span>
-            </div>
-
+            <div className="form-section-title"><Wrench size={20} className="icon-accent" /><span>Administración de Drive</span></div>
+            <p>Prepara las carpetas del año y gestiona los alojamientos disponibles.</p>
             <div className="admin-toolbar">
-              <div className="select-wrap" style={{ maxWidth: 140 }}>
-                <select value={selectedAdminYear} onChange={e => { setSelectedAdminYear(e.target.value); setAdminScan(null); setMonthFiles([]); }}>
-                  {[currentYear - 2, currentYear - 1, currentYear, currentYear + 1, currentYear + 2, currentYear + 3].map(y => <option key={y} value={y}>{y}</option>)}
-                </select>
-                <ChevronDown size={16} className="select-arrow" />
-              </div>
-              <button className="btn btn-secondary" onClick={() => fetchScanStructure(selectedAdminYear)} disabled={loadingAdmin}>
-                {loadingAdmin ? <Loader2 size={16} className="spin" /> : <Wrench size={16} />}
-                Escanear Drive
-              </button>
-              <button className="btn btn-secondary" onClick={handleCreatePropertyFolders} disabled={creatingPropFolders || loadingAdminProps || adminProperties.all.length === 0}>
-                {creatingPropFolders ? <Loader2 size={16} className="spin" /> : <PlusCircle size={16} />}
-                Crear carpetas de propiedades ({adminProperties.all.length})
-              </button>
-              {propFoldersResult && (
-                <span className={`upload-status-mini ${propFoldersResult.success ? 'success' : 'error'}`}>{propFoldersResult.msg}</span>
-              )}
-            </div>
-
-            {/* -- Propiedades: Lodgify + añadidas a mano -- */}
-            <div className="admin-toolbar" style={{ marginTop: '0.75rem' }}>
-              <input
-                type="text"
-                placeholder="Propiedad que no está en Lodgify..."
-                value={newPropertyName}
-                onChange={e => setNewPropertyName(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleAddProperty()}
-                style={{ flex: 1, minWidth: 220 }}
-              />
-              <button className="btn btn-secondary" onClick={handleAddProperty} disabled={addingProperty || !newPropertyName.trim()}>
-                {addingProperty ? <Loader2 size={16} className="spin" /> : <PlusCircle size={16} />}
-                Añadir propiedad
+              <label htmlFor="admin-year">Año</label>
+              <select id="admin-year" value={selectedAdminYear} disabled={adminBusy} onChange={e => {
+                const year = e.target.value;
+                setSelectedAdminYear(year);
+                setCreateResult(null);
+                setPropFoldersResult(null);
+                fetchScanStructure(year, true);
+              }} style={{ width: 'auto' }}>
+                {[currentYear - 2, currentYear - 1, currentYear, currentYear + 1, currentYear + 2, currentYear + 3].map(y => <option key={y} value={y}>{y}</option>)}
+              </select>
+              <button className="btn btn-secondary" onClick={() => fetchScanStructure(selectedAdminYear, true)} disabled={loadingAdmin || adminBusy}>
+                {loadingAdmin ? <Loader2 size={16} className="spin" /> : <Wrench size={16} />} Escanear Drive
               </button>
             </div>
-            {adminPropsError && (
-              <div className="status-msg error" style={{ margin: '0.5rem 0' }}>⚠️ {adminPropsError}</div>
-            )}
-            {adminProperties.manual.length > 0 && (
-              <p style={{ fontSize: '0.85rem', opacity: 0.8 }}>
-                Añadidas a mano ({adminProperties.manual.length}): {adminProperties.manual.join(', ')}
-              </p>
-            )}
-
-            {/* Error de escaneo */}
-            {adminError && (
-              <div className="status-msg error" style={{ margin: '1rem 0' }}>
-                ⚠️ {adminError}
-              </div>
-            )}
-
-            {/* Grid de disponibilidad de colores */}
-            {adminScan && !adminError && (
-              <div className="admin-grid-wrap">
-                <h3 className="admin-section-title">Disponibilidad de Colores — {adminScan.year}</h3>
-                <div className="color-grid">
-                  <div className="color-grid-header">Color</div>
-                  {["Q1", "Q2", "Q3", "Q4"].map(q => (
-                    <div key={q} className="color-grid-header">{["Ene-Feb-Mar", "Abr-May-Jun", "Jul-Ago-Sep", "Oct-Nov-Dic"][["Q1", "Q2", "Q3", "Q4"].indexOf(q)]}</div>
-                  ))}
-                  {adminScan.colorPalette.map(color => (
-                    <React.Fragment key={color.id}>
-                      <div className="color-cell color-label-cell">
-                        <span className="color-dot" style={{ background: color.hex }}></span>
-                        {color.label}
-                      </div>
-                      {["Q1", "Q2", "Q3", "Q4"].map(q => {
-                        const used = adminScan.availability[q].used.includes(color.id);
-                        const folderInfo = adminScan.structure[q].find(f => f.matchesYear && f.color === color.id);
-                        return (
-                          <div key={q} className={`color-cell ${used ? 'cell-used' : 'cell-free'}`}>
-                            {used ? (
-                              <span title={folderInfo?.name || 'Ocupado'}>✓ Ocupado</span>
-                            ) : (
-                              <>
-                                <span>— Libre</span>
-                                <input
-                                  type="checkbox"
-                                  className="cell-checkbox"
-                                  checked={colorAssignments[q] === color.id}
-                                  onChange={e => setColorAssignments(prev => e.target.checked ? { ...prev, [q]: color.id } : Object.fromEntries(Object.entries(prev).filter(([k]) => k !== q || prev[k] !== color.id)))}
-                                />
-                              </>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </React.Fragment>
-                  ))}
+            {loadingAdmin && <p role="status">Consultando las carpetas de {selectedAdminYear}...</p>}
+            {adminError && <div className="status-msg error" role="alert">{adminError} Usa "Escanear Drive" para reintentar.</div>}
+            {adminScan && (
+              <section aria-label="Carpetas trimestrales">
+                <h3 className="admin-section-title">Trimestres de {adminScan.year}</h3>
+                <p>Elige un color en los trimestres que quieras preparar o actualizar. Las carpetas existentes se reutilizan.</p>
+                <div className="admin-quarter-grid">
+                  {['Q1', 'Q2', 'Q3', 'Q4'].map((q, i) => {
+                    const folders = adminScan.structure[q].filter(f => f.matchesYear);
+                    return <div className="admin-quarter" key={q}>
+                      <h4>{['Enero – Marzo', 'Abril – Junio', 'Julio – Septiembre', 'Octubre – Diciembre'][i]}</h4>
+                      {folders.length ? folders.map(f => <p key={f.id}><a href={`https://drive.google.com/drive/folders/${encodeURIComponent(f.id)}`} target="_blank" rel="noreferrer">Abrir carpeta</a> · {f.colorLabel}</p>) : <p>Pendiente de crear</p>}
+                      <label htmlFor={`color-${q}`}>Color del trimestre {i + 1}</label>
+                      <select id={`color-${q}`} value={colorAssignments[q] || ''} disabled={adminBusy} onChange={e => {
+                        const value = e.target.value;
+                        setColorAssignments(prev => { const next = { ...prev }; if (value) next[q] = value; else delete next[q]; return next; });
+                      }}>
+                        <option value="">No modificar</option>
+                        {adminScan.colorPalette.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                      </select>
+                    </div>;
+                  })}
                 </div>
-
-                {Object.keys(colorAssignments).length > 0 && (
-                  <div className="admin-create-bar">
-                    <p>Crear carpetas seleccionadas para <strong>{selectedAdminYear}</strong>:</p>
-                    {["Q1", "Q2", "Q3", "Q4"].filter(q => colorAssignments[q]).map(q => (
-                      <span key={q} className="create-badge">
-                        <span className="color-dot" style={{ background: adminScan.colorPalette.find(c => c.id === colorAssignments[q])?.hex }}></span>
-                        {["Q1 → Ene-Mar", "Q2 → Abr-Jun", "Q3 → Jul-Sep", "Q4 → Oct-Dic"][["Q1", "Q2", "Q3", "Q4"].indexOf(q)]}
-                      </span>
-                    ))}
-                    <button className="btn btn-primary" onClick={handleCreateStructure} disabled={creatingStructure}>
-                      {creatingStructure ? <Loader2 size={16} className="spin" /> : <PlusCircle size={16} />}
-                      Crear Estructura en Drive
-                    </button>
-                    {createResult && (
-                      <span className={`upload-status-mini ${createResult.success ? 'success' : 'error'}`}>{createResult.msg}</span>
-                    )}
-                  </div>
-                )}
-              </div>
+                <button className="btn btn-primary" onClick={handleCreateStructure} disabled={adminBusy || !Object.keys(colorAssignments).length}>
+                  {creatingStructure && <Loader2 size={16} className="spin" />} Preparar trimestres seleccionados
+                </button>
+              </section>
             )}
+            {createResult && <p className={`status-msg ${createResult.success ? 'success' : 'error'}`} role={createResult.success ? 'status' : 'alert'}>{createResult.msg}</p>}
 
+            <section className="help-section" aria-label="Propiedades de Administración">
+              <h3><Home size={16} /> Propiedades</h3>
+              <p>{adminProperties.lodgify.length} de Lodgify · {adminProperties.manual.length} manuales · {adminProperties.all.length} en total.</p>
+              <button className="btn btn-secondary" onClick={() => fetchAdminProperties(true)} disabled={loadingAdminProps || adminBusy}>
+                {loadingAdminProps ? 'Cargando propiedades...' : 'Actualizar propiedades'}
+              </button>
+              {adminPropsError && <p className="status-msg error" role="alert">{adminPropsError} Pulsa "Actualizar propiedades" para reintentar.</p>}
+              <label htmlFor="manual-property">Añadir un alojamiento que no está en Lodgify</label>
+              <div className="admin-toolbar">
+                <input id="manual-property" type="text" placeholder="Nombre del alojamiento" value={newPropertyName} disabled={adminBusy}
+                  onChange={e => setNewPropertyName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddProperty(); } }} style={{ flex: 1, minWidth: 0 }} />
+                <button className="btn btn-secondary" onClick={handleAddProperty} disabled={adminBusy || loadingAdminProps || !newPropertyName.trim()}>
+                  {addingProperty && <Loader2 size={16} className="spin" />} Añadir propiedad
+                </button>
+              </div>
+              {propertyResult && <p className={`status-msg ${propertyResult.success ? 'success' : 'error'}`} role={propertyResult.success ? 'status' : 'alert'}>{propertyResult.msg}</p>}
+              {adminProperties.manual.length > 0 && <p>Manuales: {adminProperties.manual.join(', ')}</p>}
+            </section>
+            <section className="help-section" aria-label="Carpetas espejo">
+              <h3><FolderPlus size={16} /> Carpetas por propiedad</h3>
+              <p>Prepara la copia espejo: Propiedad / {selectedAdminYear} / Trimestre. Puede tardar varios minutos; las carpetas existentes se conservan.</p>
+              <button className="btn btn-secondary" onClick={handleCreatePropertyFolders} disabled={adminBusy || loadingAdminProps || !!adminPropsError || !adminProperties.all.length}>
+                {creatingPropFolders && <Loader2 size={16} className="spin" />} Crear carpetas de propiedades ({adminProperties.all.length})
+              </button>
+              {propFoldersResult && <p className={`status-msg ${propFoldersResult.success ? 'success' : 'error'}`} role={propFoldersResult.success ? 'status' : 'alert'}>{propFoldersResult.msg}</p>}
+            </section>
           </motion.div>
         )}
 
@@ -1614,18 +1575,21 @@ export default function App() {
                 <li><Eye size={14} /> <strong>Ver factura</strong> abre la vista previa. Solo aparece si la incidencia tiene REF o ID de factura. Si no la encuentra en el mes de la incidencia, la busca sola en el resto de meses del año (por eso el selector "Mes" de la vista previa puede cambiar solo).</li>
                 <li><Pencil size={14} /> <strong>Editar</strong> abre la incidencia en el formulario; cambia lo necesario y pulsa "Guardar Cambios".</li>
                 <li><Trash2 size={14} /> <strong>Borrar</strong> pide confirmación y elimina la fila del historial. <strong>No borra la factura de Drive</strong>; si también sobra, bórrala a mano en Drive.</li>
-                <li>El historial se guarda en memoria unos minutos para que cargue rápido. Lo que se cambia desde la app se ve al momento; lo que se cambia <strong>a mano en la hoja de cálculo</strong> puede tardar hasta 5 minutos en verse.</li>
+                <li>El historial se reutiliza durante un minuto. "Actualizar historial" vuelve a consultarlo; si falla, pulsa "Reintentar". Lo que se cambia desde la app se ve al momento; lo que se cambia <strong>a mano en la hoja de cálculo</strong> puede tardar hasta 5 minutos en verse.</li>
               </ol>
             </div>
 
             <div className="help-section">
               <h3><Wrench size={16} /> Administración</h3>
               <ol>
-                <li><strong>"Añadir propiedad":</strong> para alojamientos que no están en Lodgify. Escribe el nombre y pulsa el botón (o Enter). Aparecerá en el buscador de Propiedad.</li>
-                <li><strong>"Escanear Drive":</strong> elige el año y muestra, por trimestre, qué colores de carpeta están ocupados o libres.</li>
-                <li><strong>"Crear Estructura en Drive":</strong> marca un color libre para cada trimestre y pulsa el botón; crea las carpetas del trimestre con sus meses. Si ya existían, solo actualiza el color.</li>
-                <li><strong>"Crear carpetas de propiedades":</strong> crea en la carpeta espejo Propiedad / Año / Trimestre para todas las propiedades. No borra nada.</li>
-                <li><strong>Cada enero:</strong> (1) crear en la hoja de cálculo la pestaña "INCIDENCIA {new Date().getFullYear() + 1}" con las mismas columnas; (2) aquí, elegir el año nuevo, escanear y "Crear Estructura en Drive". Sin eso, no se podrán subir facturas del año nuevo.</li>
+                <li><strong>Elige el año:</strong> sus carpetas se consultan automáticamente. Cambiar de año limpia la selección anterior. Al volver a la pestaña se reutiliza la consulta durante un minuto; "Escanear Drive" fuerza una nueva consulta.</li>
+                <li><strong>Prepara los trimestres:</strong> cada tarjeta muestra si existe la carpeta y permite abrirla en Drive. Elige un color en los trimestres necesarios y pulsa "Preparar trimestres seleccionados". "No modificar" deja ese trimestre como está.</li>
+                <li>La estructura principal es <code>Trimestre y año / INCIDENCIAS</code>. Las subcarpetas de propiedad y mes se crean al subir cada factura. Preparar de nuevo un trimestre reutiliza su carpeta y cambia el color; no mueve ni borra facturas.</li>
+                <li><strong>Propiedades:</strong> "Actualizar propiedades" recarga Lodgify y las añadidas a mano. Si aparece un error, resuélvelo y reintenta antes de crear carpetas para todos los alojamientos.</li>
+                <li><strong>Añadir propiedad:</strong> escribe el nombre y pulsa el botón o Enter. Espera la confirmación; aparecerá en Nuevo Reporte. Si ya existe en la lista manual, no se duplica. El buscador combina estos nombres con los alojamientos de la hoja, conservando sus referencias y encargados.</li>
+                <li><strong>Crear carpetas de propiedades:</strong> prepara la copia espejo en <code>Facturas-Incidencias / Propiedad / Año / Trimestre</code> para la lista cargada. Puede tardar varios minutos y no reemplaza la preparación de los trimestres principales.</li>
+                <li><strong>Confirmaciones:</strong> el éxito se muestra cuando el servidor confirma el resultado. Si se agota la espera, actualiza y comprueba Drive antes de repetir: la operación puede haber continuado. Si la carpeta se creó pero el color falló, el mensaje lo indicará.</li>
+                <li><strong>Cada enero:</strong> crea en Google Sheets la pestaña "INCIDENCIA &lt;año nuevo&gt;" con las mismas columnas y prepara aquí los trimestres de ese año.</li>
               </ol>
             </div>
 
@@ -1650,7 +1614,7 @@ export default function App() {
                 <li><strong>No sale el botón "Ver factura" en el Historial</strong> — esa incidencia no tiene REF ni ID de factura guardados. Edítala y elige la factura en el desplegable de referencias.</li>
                 <li><strong>La vista previa muestra otra factura o ninguna</strong> — comprueba que la incidencia tiene la propiedad y la REF correctas (Editar). La búsqueda usa ID, nombre, propiedad y REF.</li>
                 <li><strong>Guardar tarda</strong> — es normal que "Enviar Incidencia" tarde algunos segundos: la hoja de cálculo es grande. No pulses el botón dos veces.</li>
-                <li><strong>El historial sale vacío o con error</strong> — recarga la página. Si sigue igual, avisa al responsable técnico.</li>
+                <li><strong>El historial sale vacío o con error</strong> — pulsa "Reintentar" o "Actualizar historial". Si sigue igual, comunica el mensaje de error al responsable técnico.</li>
               </ol>
             </div>
 

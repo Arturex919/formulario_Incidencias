@@ -1221,3 +1221,9 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   border-radius: 4px;
   font-weight: 600;
 }
+
+.admin-quarter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 1rem; margin: 1rem 0; }
+.admin-quarter { padding: 1rem; border: 1px solid var(--border); border-radius: var(--radius); min-width: 0; }
+.admin-quarter h4 { margin: 0 0 0.75rem; }
+.admin-quarter label { display: block; margin: 0.75rem 0 0.4rem; }
+.admin-quarter select { width: 100%; }
