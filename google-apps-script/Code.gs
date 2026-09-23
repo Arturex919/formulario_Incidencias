@@ -249,13 +249,14 @@ function getLodgifyProperties() {
       return { error: "Lodgify " + res.getResponseCode() + ": " + res.getContentText(), names };
     }
     const body  = JSON.parse(res.getContentText());
-    const items = body.data || [];
+    // La v2 devuelve la lista en "items"; se acepta "data" por si cambia. Leer solo "data" daba siempre 0 propiedades.
+    const items = body.items || body.data || [];
     items.forEach(p => { if (p.name) names.push(String(p.name).trim()); });
 
-    const total = (body.pagination && body.pagination.total) || items.length;
-    if (items.length === 0 || page * size >= total) break;
+    if (items.length < size) break; // última página
     page++;
   }
+  if (!names.length) return { error: "Lodgify respondió sin propiedades (revisa la API key o el formato de respuesta)", names };
   return { names };
 }
 
