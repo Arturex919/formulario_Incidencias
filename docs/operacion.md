@@ -43,10 +43,11 @@ Los dos scripts de Playwright necesitan `playwright` instalado o `PLAYWRIGHT_MOD
 
 ## Pendientes manuales
 
-Estado a 2026-09-23.
+Estado a 2026-09-28.
 
-- [ ] **Redesplegar el Apps Script** con el `Code.gs` actual. Producción sigue en una versión anterior (acepta `year=abc` y tiene `ensureMonths`). Sin esto no llegan los arreglos de Lodgify, papelera, Administración ni carpeta sin año.
-- [ ] **Desplegar el frontend** (`main` actual).
+- [x] **Redesplegar el Apps Script** con los arreglos de Lodgify, papelera, Administración, carpeta sin año y nombre de factura en Drive (hecho el 2026-09-28, según el usuario).
+- [ ] **Redesplegar el Apps Script otra vez** para que llegue la búsqueda de factura por ID primero (commit `06cc1d2`, posterior a ese redespliegue).
+- [ ] **Desplegar el frontend** (`main` actual: desplegable que sincroniza nombre e ID, y subida de varias facturas con barra de progreso).
 - [ ] Después, ejecutar `node scripts/prueba-real.mjs` y comprobar que pasa entero.
 - [ ] Borrar la carpeta vacía `ABRIL` (ID `1Xt0bllIrXMYZPzvgHlBjJy4UmCUFoMxX`) dentro de `ABRIL-MAYO-JUNIO`. La creó una prueba ([E12](errores-y-soluciones.md#e12-un-get-que-escribe-ensuremonths)).
 - [ ] Revisar los duplicados de septiembre en Drive y en su copia espejo ([E8](errores-y-soluciones.md#e8-el-selector-muestra-facturas-que-ya-no-están)): Portofino REF 003/004, Agua Marina REF 007 ×2, `tv valdelinares … ....pdf`.

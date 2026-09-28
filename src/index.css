@@ -756,6 +756,36 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .upload-status-mini.success { background: rgba(16, 185, 129, 0.1); color: #10b981; }
 .upload-status-mini.error { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
 
+/* Varias facturas elegidas, cada una con su nombre, antes de subirlas */
+.pending-files { display: flex; flex-direction: column; gap: 0.6rem; }
+.pending-file { display: flex; align-items: center; gap: 0.5rem; }
+.pending-file-name { flex: 1; min-width: 0; }
+.pending-file-name small {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-progress { display: flex; flex-direction: column; gap: 0.4rem; }
+.upload-progress small { font-size: 0.82rem; color: var(--text-muted); }
+.upload-progress-track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(127, 127, 127, 0.2);
+  overflow: hidden;
+}
+.upload-progress-fill {
+  height: 100%;
+  min-width: 4%;
+  border-radius: inherit;
+  background: var(--primary);
+  transition: width 0.4s ease;
+}
+
 .ref-counter-badge {
   background: var(--primary);
   color: white;
