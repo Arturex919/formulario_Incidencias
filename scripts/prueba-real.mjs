@@ -21,12 +21,12 @@ try {
     r.request().method() === 'POST' ? r.abort() : r.continue());
   await page.goto(server.resolvedUrls.local[0]);
 
-  // Nuevo Reporte: REF numérica y subida bloqueada hasta elegir propiedad
-  await page.waitForFunction(() => /^\d+$/.test(document.querySelector('.ref-counter-badge strong')?.textContent || ''), null, { timeout: 180000 });
-  const ref = await page.locator('.ref-counter-badge strong').textContent();
+  // Nuevo Reporte: subida bloqueada hasta elegir propiedad y facturas del mes leídas de Drive
   assert.equal((await page.locator('.upload-text p').first().textContent()).trim(), 'Primero elige la propiedad.');
   assert.ok(await page.locator('#invoice-upload').isDisabled());
-  console.log(`[${s()}] Nuevo Reporte OK · próxima REF ${ref}`);
+  await page.waitForFunction(() => document.querySelector('#ref optgroup, #ref option[disabled]') || document.querySelector('[role=alert]'), null, { timeout: 180000 });
+  assert.equal(await page.locator('[role=alert]').filter({ hasText: 'No se pudieron leer las facturas' }).count(), 0, 'Drive no devolvió las facturas del mes');
+  console.log(`[${s()}] Nuevo Reporte OK · ${await page.locator('#ref optgroup option').count()} facturas del mes en Drive`);
 
   // Historial: carga filas reales
   await page.getByRole('button', { name: /Ver Historial/ }).click();
