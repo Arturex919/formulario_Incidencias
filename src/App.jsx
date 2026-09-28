@@ -456,13 +456,10 @@ export default function App() {
 
   useEffect(() => () => historyRequest.current?.abort(), []);
 
+  // Un solo efecto: con dos (pestaña y periodo) al abrir la app se pedía lo mismo dos veces a Apps Script.
   useEffect(() => {
     if (activeTab === "nuevo") fetchFacturasMes(selectedMonth, selectedYear);
-  }, [activeTab]);
-
-  useEffect(() => {
-    if (activeTab === "nuevo") fetchFacturasMes(selectedMonth, selectedYear);
-  }, [selectedMonth, selectedYear]);
+  }, [activeTab, selectedMonth, selectedYear]);
 
   // Facturas ya subidas en el mes (para el desplegable, el aviso de nombre repetido y confirmar subidas).
   const fetchFacturasMes = async (month, year) => {
