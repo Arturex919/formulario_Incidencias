@@ -289,10 +289,12 @@ function addManualProperty(name) {
 }
 
 // ── Unión: Lodgify + manuales, sin duplicados ─────────────────────────────────
-function getAllProperties() {
+// Leer las manuales abre el libro grande (lento) → se cachea 6 h. "Actualizar propiedades" en Administración pasa force.
+const PROPERTIES_CACHE_TTL = 21600; // s, máximo de CacheService
+function getAllProperties(force) {
   const cache = CacheService.getScriptCache();
   try {
-    const cached = cache.get("admin_properties_v1");
+    const cached = force ? null : cache.get("admin_properties_v1");
     if (cached) return JSON.parse(cached);
   } catch (_) {}
   let lodgify = { names: [] };
@@ -304,7 +306,7 @@ function getAllProperties() {
   const unique = [...new Map(lodgify.names.concat(manual).map(n => [n.toUpperCase(), n])).values()].sort((a, b) => a.localeCompare(b));
   const result = { error: errors.join(" · ") || null, lodgify: lodgify.names, manual, all: unique };
   if (!result.error) {
-    try { cache.put("admin_properties_v1", JSON.stringify(result), 300); } catch (_) {}
+    try { cache.put("admin_properties_v1", JSON.stringify(result), PROPERTIES_CACHE_TTL); } catch (_) {}
   }
   return result;
 }
@@ -321,7 +323,7 @@ function doGet(e) {
     if (action === "findInvoice" || action === "findInvoiceById") {
       return jsonResponse(findInvoiceSmart(e.parameter.id, e.parameter.name, e.parameter.ref, e.parameter.month, e.parameter.year, e.parameter.propiedad));
     }
-    if (action === "getProperties")  return jsonResponse(getAllProperties());
+    if (action === "getProperties")  return jsonResponse(getAllProperties(e.parameter.force === "1"));
 
     if (action === "read") {
       const cached = getCachedRead();
@@ -472,10 +474,21 @@ function scanDriveStructure(year) {
   return { year: yearStr, structure, availability, colorPalette: COLOR_PALETTE };
 }
 
+// Caché del listado de un mes: recorrer las carpetas de propiedad tarda varios segundos y findInvoiceSmart lo pide hasta 12 veces.
+// Se invalida al subir una factura; lo que se cambie a mano en Drive tarda como mucho MONTH_FILES_TTL en verse.
+const MONTH_FILES_TTL = 600; // s
+function monthFilesKey(month, year) {
+  return "month_files_" + (year || TARGET_YEAR) + "_" + String(month).toUpperCase();
+}
+
 // ── LISTAR ARCHIVOS DEL MES (solo año correcto) ───────────────────────────────
 function getMonthFiles(month, year) {
   const monthNum = MONTH_NAMES_ES.indexOf(month) + 1;
   if (monthNum === 0) return [];
+
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get(monthFilesKey(month, year));
+  if (cached) return JSON.parse(cached);
 
   let quarterKey = "Q4";
   for (const [q, cfg] of Object.entries(QUARTER_CONFIG)) {
@@ -532,12 +545,14 @@ function getMonthFiles(month, year) {
     }
   }
 
-  return results.sort((a, b) => {
+  results.sort((a, b) => {
     if (a.ref === "---" && b.ref === "---") return 0;
     if (a.ref === "---") return 1;
     if (b.ref === "---") return -1;
     return parseInt(a.ref,10) - parseInt(b.ref,10);
   });
+  try { cache.put(monthFilesKey(month, year), JSON.stringify(results), MONTH_FILES_TTL); } catch (_) {} // >100KB: sin caché, sigue funcionando
+  return results;
 }
 
 // ── GUARDAR FACTURA → Trimestre > INCIDENCIAS > Propiedad > Mes ──────────────
@@ -588,6 +603,7 @@ function saveInvoiceToDrive(base64Data, originalFileName, refNumber, month, year
   if (propiedad) {
     file.makeCopy(newFileName, getPropertyQuarterFolder(propiedad, quarterKey, ty));
   }
+  CacheService.getScriptCache().remove(monthFilesKey(tm, ty)); // la app confirma la subida leyendo el mes: tiene que verla ya
 
   return {
     success:    true,
@@ -944,5 +960,6 @@ function migrateOldInvoicesToIncidencias(year) {
     }
   });
 
+  CacheService.getScriptCache().removeAll(MONTH_NAMES_ES.map(m => monthFilesKey(m, ty)));
   return { success: true, year: ty, count: moved.length, moved };
 }

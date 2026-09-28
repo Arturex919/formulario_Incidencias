@@ -46,7 +46,7 @@ Los dos scripts de Playwright necesitan `playwright` instalado o `PLAYWRIGHT_MOD
 Estado a 2026-09-28.
 
 - [x] **Redesplegar el Apps Script** con los arreglos de Lodgify, papelera, Administración, carpeta sin año y nombre de factura en Drive (hecho el 2026-09-28, según el usuario).
-- [ ] **Redesplegar el Apps Script otra vez** para que llegue la búsqueda de factura por ID primero (commit `06cc1d2`, posterior a ese redespliegue).
+- [ ] **Redesplegar el Apps Script otra vez** para que lleguen la búsqueda de factura por ID primero (commit `06cc1d2`) y la caché de facturas del mes (10 min) y de propiedades (6 h). Cambios hechos a mano en Drive tardan hasta 10 min en verse en la app; una propiedad nueva de Lodgify, hasta 6 h (o pulsar "Actualizar propiedades" en Administración).
 - [ ] **Desplegar el frontend** (`main` actual: desplegable que sincroniza nombre e ID, y subida de varias facturas con barra de progreso).
 - [ ] Después, ejecutar `node scripts/prueba-real.mjs` y comprobar que pasa entero.
 - [ ] Borrar la carpeta vacía `ABRIL` (ID `1Xt0bllIrXMYZPzvgHlBjJy4UmCUFoMxX`) dentro de `ABRIL-MAYO-JUNIO`. La creó una prueba ([E12](errores-y-soluciones.md#e12-un-get-que-escribe-ensuremonths)).
