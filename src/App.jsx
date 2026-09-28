@@ -5,7 +5,7 @@ import {
   FileText, Send, CheckCircle, AlertCircle, ChevronDown,
   User, Home, Calendar, ClipboardList, Wrench, DollarSign,
   MessageSquare, PlusCircle, Loader2, Moon, Sun, Truck, Eraser, Pencil, FolderPlus,
-  Search, Trash2, ChevronLeft, ChevronRight, Eye, HelpCircle
+  Search, Trash2, ChevronLeft, ChevronRight, Eye, HelpCircle, Download
 } from 'lucide-react';
 // ─── Opciones del desplegable (igual que en el Excel) ──────────────────────────
 const CLASIFICACIONES = [
@@ -108,6 +108,31 @@ const normalizarFechaParaInput = (fechaRaw) => {
   } catch (e) {
     return new Date().toISOString().split("T")[0];
   }
+};
+
+// "YYYY-MM-DD" en hora local, o "" si no es una fecha: sirve para comparar con los <input type="date"> del filtro.
+const fechaLocalISO = (fechaRaw) => {
+  const d = new Date(fechaRaw);
+  if (!fechaRaw || isNaN(d.getTime())) return "";
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+// CSV para Excel en español: separador ";" y BOM para que respete tildes y €.
+const descargarCSV = (filas, nombreArchivo) => {
+  const columnas = [...new Set(filas.flatMap(f => Object.keys(f)))].filter(c => c !== "rowIndex");
+  const celda = (v) => {
+    let s = v == null ? "" : String(v);
+    // Las fechas llegan de la hoja como "2026-09-01T22:00:00.000Z": se pasan a dd/mm/aaaa local
+    if (/^\d{4}-\d{2}-\d{2}T/.test(s)) s = fechaLocalISO(s).split("-").reverse().join("/");
+    return /[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const csv = [columnas, ...filas.map(f => columnas.map(c => f[c]))].map(fila => fila.map(celda).join(";")).join("\r\n");
+  const url = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nombreArchivo;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000); // revocar en el mismo tick puede cortar la descarga en algunos navegadores
 };
 
 // La hoja tiene dos columnas de referencia: "ref" (histórico) y "REF. FACTURA " (con
@@ -343,6 +368,8 @@ export default function App() {
   // Historial: Filtros y Paginación
   const [filterPropiedad, setFilterPropiedad] = useState("");
   const [filterMonth, setFilterMonth] = useState("");
+  const [filterDesde, setFilterDesde] = useState(""); // "YYYY-MM-DD"
+  const [filterHasta, setFilterHasta] = useState("");
   const [previewRow, setPreviewRow] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 5;
@@ -808,6 +835,27 @@ export default function App() {
     setUploadProgress(null);
     setIsUploading(false);
   };
+
+  // Historial: filtrado (también es lo que se descarga)
+  const incidenciasFiltradas = incidencias.filter(inc => {
+    const searchLower = filterPropiedad.toLowerCase();
+    const matchesPropiedad = String(inc["PROPIEDAD"] || "").toLowerCase().includes(searchLower);
+    // Buscamos por la referencia (usando la clave 'ref' que viene del Excel)
+    const matchesRef = refDeIncidencia(inc).toLowerCase().includes(searchLower);
+    const matchesSearch = matchesPropiedad || matchesRef;
+
+    const matchesMonth = (() => {
+      if (!filterMonth) return true;
+      const d = new Date(inc["FECHA"] || inc["FECHA REPORTE INCIDENCIA"]);
+      return !isNaN(d.getTime()) && MONTHS[d.getMonth()] === filterMonth;
+    })();
+
+    // Rango de fechas por la fecha de la incidencia; sin fecha válida queda fuera si hay rango
+    const fecha = fechaLocalISO(inc["FECHA"] || inc["FECHA REPORTE INCIDENCIA"]);
+    const matchesRango = (!filterDesde || (fecha && fecha >= filterDesde)) && (!filterHasta || (fecha && fecha <= filterHasta));
+
+    return matchesSearch && matchesMonth && matchesRango;
+  });
 
   const clasificacionFinal =
     form.clasificacion === "OTRO" ? form.clasificacionOtro : form.clasificacion;
@@ -1373,6 +1421,29 @@ export default function App() {
                 </select>
                 <ChevronDown size={16} className="select-arrow" />
               </div>
+              <div className="date-range">
+                <label>
+                  <span>Desde</span>
+                  <input type="date" value={filterDesde} max={filterHasta || undefined}
+                    onChange={(e) => { setFilterDesde(e.target.value); setCurrentPage(1); }} />
+                </label>
+                <label>
+                  <span>Hasta</span>
+                  <input type="date" value={filterHasta} min={filterDesde || undefined}
+                    onChange={(e) => { setFilterHasta(e.target.value); setCurrentPage(1); }} />
+                </label>
+                {(filterDesde || filterHasta) && (
+                  <button type="button" className="btn btn-secondary btn-icon-only" title="Quitar fechas"
+                    onClick={() => { setFilterDesde(""); setFilterHasta(""); setCurrentPage(1); }}>
+                    <Eraser size={16} />
+                  </button>
+                )}
+              </div>
+              <button type="button" className="btn btn-primary" disabled={!incidenciasFiltradas.length}
+                title="Descarga las incidencias que se ven con los filtros actuales"
+                onClick={() => descargarCSV(incidenciasFiltradas, `incidencias${filterDesde ? "_desde_" + filterDesde : ""}${filterHasta ? "_hasta_" + filterHasta : ""}.csv`)}>
+                <Download size={18} /> Descargar ({incidenciasFiltradas.length})
+              </button>
             </div>
 
             <button type="button" className="btn btn-secondary" onClick={() => fetchIncidencias(true)} disabled={loadingHistory}>
@@ -1390,22 +1461,7 @@ export default function App() {
                 <p>Cargando historial...</p>
               </div>
             ) : (() => {
-              // Filtrado
-              const filtered = incidencias.filter(inc => {
-                const searchLower = filterPropiedad.toLowerCase();
-                const matchesPropiedad = String(inc["PROPIEDAD"] || "").toLowerCase().includes(searchLower);
-                // Buscamos por la referencia (usando la clave 'ref' que viene del Excel)
-                const matchesRef = refDeIncidencia(inc).toLowerCase().includes(searchLower);
-                const matchesSearch = matchesPropiedad || matchesRef;
-
-                const matchesMonth = (() => {
-                  if (!filterMonth) return true;
-                  const d = new Date(inc["FECHA"] || inc["FECHA REPORTE INCIDENCIA"]);
-                  return !isNaN(d.getTime()) && MONTHS[d.getMonth()] === filterMonth;
-                })();
-
-                return matchesSearch && matchesMonth;
-              });
+              const filtered = incidenciasFiltradas;
 
               // Paginación
               const totalPages = Math.ceil(filtered.length / itemsPerPage);
