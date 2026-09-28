@@ -1029,8 +1029,9 @@ export default function App() {
                         setForm(prev => ({
                           ...prev,
                           ref: found?.ref && found.ref !== "---" ? found.ref : (val !== "---" ? val : prev.ref),
-                          nombreFactura: found ? (found.clientName || found.fullName) : prev.nombreFactura,
-                          idFactura: prev.idFactura
+                          // Nombre e ID salen del mismo archivo: mezclarlos hacía que la vista previa buscara otra factura.
+                          nombreFactura: found ? String(found.clientName || found.fullName).split(/ FAC-/i)[0].trim() : prev.nombreFactura,
+                          idFactura: found ? (found.fullName.match(/FAC-[A-Z0-9]+-[A-Z0-9]+/i)?.[0] || "") : prev.idFactura
                         }));
                         setSelectedRefFileName(found ? found.fullName : "");
                       }}
