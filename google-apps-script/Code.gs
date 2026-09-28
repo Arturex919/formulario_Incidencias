@@ -707,6 +707,29 @@ function findInvoiceSmart(id, name, ref, month, year, propiedad) {
   const monthStr  = String(month || "").trim();
   const propStr   = String(propiedad || "").trim().toUpperCase();
 
+  // ── 0. Por ID único: una sola consulta a Drive en vez de recorrer carpetas mes a mes.
+  //      Un archivo recién subido puede tardar en indexarse → si no aparece, sigue el recorrido normal.
+  if (cleanId && /^FAC-[A-Z0-9]+-[A-Z0-9]+$/i.test(cleanId)) {
+    try {
+      const q = "title contains '" + cleanId.toUpperCase() + "' and trashed = false and (mimeType = 'application/pdf' or mimeType contains 'image/')";
+      const files = DriveApp.searchFiles(q);
+      if (files.hasNext()) {
+        const file = files.next();
+        return {
+          found: true,
+          matchBy: "id",
+          file: {
+            ref:      refFromFileName(file.getName()) || paddedRef,
+            fullName: file.getName(),
+            fileId:   file.getId(),
+            fileUrl:  file.getUrl(),
+            path:     buildPathToRoot(file)
+          }
+        };
+      }
+    } catch (_) {}
+  }
+
   // ── 1. Buscar PRIMERO dentro de la carpeta del mes (solo facturas oficiales) ──
   const monthFiles = (monthStr ? getMonthFiles(monthStr, yearStr) : []);
 
@@ -797,28 +820,6 @@ function findInvoiceSmart(id, name, ref, month, year, propiedad) {
   if (paddedRef) {
     const resRef = findInvoiceByRef(paddedRef, yearStr, monthStr);
     if (resRef.found) return resRef;
-  }
-
-  // ── 3. Búsqueda por ID único (solo PDFs e imágenes dentro del proyecto) ────
-  if (cleanId && /^FAC-[A-Z0-9]+-[A-Z0-9]+$/i.test(cleanId)) {
-    try {
-      const q = "title contains '" + cleanId.toUpperCase() + "' and trashed = false and (mimeType = 'application/pdf' or mimeType contains 'image/')";
-      const files = DriveApp.searchFiles(q);
-      if (files.hasNext()) {
-        const file = files.next();
-        return {
-          found: true,
-          matchBy: "id",
-          file: {
-            ref:      refFromFileName(file.getName()) || paddedRef,
-            fullName: file.getName(),
-            fileId:   file.getId(),
-            fileUrl:  file.getUrl(),
-            path:     buildPathToRoot(file)
-          }
-        };
-      }
-    } catch (_) {}
   }
 
   return { found: false };
