@@ -133,7 +133,9 @@ function FacturaPreview({ refNum, fecha, idFactura, nombreFactura, propiedad, me
   const refs = String(refNum || "").split(SEPARADOR_FACTURAS);
   const totalFacturas = Math.max(ids.length, nombres.length, refs.length);
   const [idx, setIdx] = useState(0);
-  const id = ids[idx] || "", nombre = nombres[idx] || "", ref = refs[idx] || "";
+  const id = ids[idx] || "", nombre = nombres[idx] || "";
+  // Se busca por ID y nombre; la REF solo para facturas viejas que no tienen ninguno de los dos.
+  const ref = id || nombre ? "" : refs[idx] || "";
 
   const d = new Date(fecha);
   const valida = !isNaN(d.getTime());
@@ -326,7 +328,7 @@ export default function App() {
   const currentYear = new Date().getFullYear();
   const [selectedMonth, setSelectedMonth] = useState(MONTHS[new Date().getMonth()]);
   const [selectedYear, setSelectedYear] = useState(currentYear.toString());
-  const [nextRef, setNextRef] = useState("...");
+  const [refsError, setRefsError] = useState("");
   const [existingRefs, setExistingRefs] = useState([]);
   const [loadingRefs, setLoadingRefs] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -455,23 +457,21 @@ export default function App() {
   useEffect(() => () => historyRequest.current?.abort(), []);
 
   useEffect(() => {
-    if (activeTab === "nuevo") fetchNextRef(selectedMonth, selectedYear);
+    if (activeTab === "nuevo") fetchFacturasMes(selectedMonth, selectedYear);
   }, [activeTab]);
 
   useEffect(() => {
-    if (activeTab === "nuevo") fetchNextRef(selectedMonth, selectedYear);
+    if (activeTab === "nuevo") fetchFacturasMes(selectedMonth, selectedYear);
   }, [selectedMonth, selectedYear]);
 
-  const fetchNextRef = async (month, year) => {
+  // Facturas ya subidas en el mes (para el desplegable, el aviso de nombre repetido y confirmar subidas).
+  const fetchFacturasMes = async (month, year) => {
     setLoadingRefs(true);
+    setRefsError("");
     try {
       const params = month && year ? `&month=${month}&year=${year}&_t=${Date.now()}` : `&_t=${Date.now()}`;
-      const resNext = await fetch(`${GOOGLE_SCRIPT_URL}?action=getNextRef${params}`);
-      const dataNext = await resNext.json();
-      // FORZAR STRING para evitar notación científica
-      if (dataNext.nextRef) setNextRef(String(dataNext.nextRef));
-
-      const resAll = await fetch(`${GOOGLE_SCRIPT_URL}?action=getAllRefs${params}`);
+      // Con tiempo máximo: si Apps Script no contesta, se avisa en vez de quedarse cargando para siempre.
+      const resAll = await fetch(`${GOOGLE_SCRIPT_URL}?action=getAllRefs${params}`, { signal: AbortSignal.timeout(60000) });
       const dataAll = await resAll.json();
       if (Array.isArray(dataAll.refs)) {
         // Forzar ref como string en cada item
@@ -482,7 +482,8 @@ export default function App() {
       setExistingRefs([]);
       return [];
     } catch (error) {
-      console.error("Error al obtener referencias:", error);
+      console.error("Error al obtener las facturas del mes:", error);
+      setRefsError(`No se pudieron leer las facturas de ${month} ${year} en Drive. Puedes subir igualmente; si persiste, recarga la página.`);
       setExistingRefs([]);
       return [];
     } finally {
@@ -683,12 +684,11 @@ export default function App() {
   };
 
   // Orden obligatorio: propiedad → archivos (un nombre por archivo) → subir. Evita facturas duplicadas (mismo nombre, propiedad y mes).
-  // Las refs se numeran por mes para todas las propiedades, pero el selector solo enseña las de la propiedad elegida.
+  // El selector solo enseña las facturas de la propiedad elegida.
   const refsPropiedad = form.propiedad
     ? existingRefs.filter(r => String(r.propiedad || "").trim().toUpperCase() === String(form.propiedad).trim().toUpperCase())
     : existingRefs;
   const bloqueoSubida =
-    !/^\d+$/.test(String(nextRef)) ? "Esperando la referencia de Drive..." :
     !form.propiedad       ? "Primero elige la propiedad." :
     "";
   const nombresPendientes = pendingFiles.map(p => p.nombre.trim().toUpperCase());
@@ -735,21 +735,18 @@ export default function App() {
 
     const total = pendingFiles.length;
     const pasos = total + 1; // una subida por archivo + la comprobación final en Drive
-    const primeraRef = parseInt(nextRef, 10);
     const enviadas = [];
     let errorRed = "";
 
     setIsUploading(true);
     setUploadStatus(null);
 
-    // Una detrás de otra: cada una se lleva la REF siguiente y Apps Script no recibe subidas simultáneas.
+    // Una detrás de otra: Apps Script no recibe subidas simultáneas. Cada factura se identifica por su nombre y su ID.
     for (let i = 0; i < total; i++) {
       const { file, nombre } = pendingFiles[i];
       const nombreLimpio = nombre.trim();
       setUploadProgress({ pct: Math.round(i / pasos * 100), msg: `Subiendo ${i + 1} de ${total}: "${nombreLimpio}"...` });
       try {
-        const ext = file.name.includes('.') ? file.name.split('.').pop() : 'pdf';
-        const ref = String(primeraRef + i).padStart(3, '0'); // SIEMPRE STRING
         const idFactura = nuevoIdFactura();
         const payload = {
           action: "uploadInvoice",
@@ -757,7 +754,6 @@ export default function App() {
           fileName: file.name,
           invoiceId: idFactura,
           invoiceName: nombreLimpio,
-          refNumber: ref,
           month: selectedMonth,
           year: selectedYear,
           propiedad: form.propiedad
@@ -768,7 +764,7 @@ export default function App() {
           mode: "no-cors",
           body: JSON.stringify(payload)
         });
-        enviadas.push({ pendiente: pendingFiles[i], nombre: nombreLimpio, idFactura, ref, fileName: `${nombreLimpio} ${idFactura} ${ref}.${ext}` });
+        enviadas.push({ pendiente: pendingFiles[i], nombre: nombreLimpio, idFactura });
       } catch {
         errorRed =`Error de red al subir "${nombreLimpio}".`;
         break;
@@ -777,8 +773,12 @@ export default function App() {
 
     // no-cors no deja leer la respuesta: se comprueba en Drive, por el ID, qué facturas están
     setUploadProgress({ pct: Math.round(total / pasos * 100), msg: "Comprobando en Drive que se han guardado..." });
-    const refs = enviadas.length ? await fetchNextRef(selectedMonth, selectedYear) : [];
-    const confirmadas = enviadas.filter(s => refs.some(r => String(r.fullName || "").includes(s.idFactura)));
+    const refs = enviadas.length ? await fetchFacturasMes(selectedMonth, selectedYear) : [];
+    // La REF la pone Apps Script en el nombre del archivo; se copia a la hoja solo como dato, no se usa para buscar.
+    const confirmadas = enviadas
+      .map(s => ({ ...s, drive: refs.find(r => String(r.fullName || "").includes(s.idFactura)) }))
+      .filter(s => s.drive)
+      .map(s => ({ ...s, ref: s.drive.ref !== "---" ? s.drive.ref : "", fileName: s.drive.fullName }));
 
     if (confirmadas.length) {
       const unir = (actual, nuevos) => [...new Set([...String(actual || "").split(SEPARADOR_FACTURAS), ...nuevos].filter(Boolean))].join(SEPARADOR_FACTURAS);
@@ -793,7 +793,7 @@ export default function App() {
     // Las que no se confirmaron se quedan en la lista para reintentarlas
     setPendingFiles(prev => prev.filter(p => !confirmadas.some(s => s.pendiente === p)));
 
-    const noConfirmadas = enviadas.filter(s => !confirmadas.includes(s)).map(s => `"${s.nombre}"`);
+    const noConfirmadas = enviadas.filter(s => !confirmadas.some(c => c.idFactura === s.idFactura)).map(s => `"${s.nombre}"`);
     if (errorRed || noConfirmadas.length) {
       setUploadStatus({
         type: 'error',
@@ -960,11 +960,6 @@ export default function App() {
               {isEditing ? <Pencil size={20} className="icon-accent" /> : <PlusCircle size={20} className="icon-accent" />}
               <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
                 <span>{isEditing ? "Modificando Incidencia Existente" : "Registrar Nueva Incidencia"}</span>
-                {!isEditing && (
-                  <span className="ref-counter-badge">
-                    Próxima Ref: <strong>{nextRef}</strong>
-                  </span>
-                )}
               </div>
             </div>
 
@@ -972,7 +967,7 @@ export default function App() {
             <div className="upload-zone animate-fade-in">
               <div className="upload-header">
                 <Truck size={18} />
-                <span>Carga de Factura (Auto-Ref)</span>
+                <span>Carga de Facturas</span>
               </div>
               <div className="upload-content">
                 {/* Nombres ya guardados en la hoja: se pueden corregir aquí (no renombra el archivo en Drive) */}
@@ -990,7 +985,7 @@ export default function App() {
                   <PlusCircle size={24} />
                   <div className="upload-text">
                     <p>{isUploading ? "Subiendo facturas..." : bloqueoSubida || "Haz clic para elegir facturas (puedes elegir varias)"}</p>
-                    <small>Se asignarán las referencias desde la {nextRef} automáticamente</small>
+                    <small>Después le pones nombre a cada una antes de subirlas</small>
                     {form.idFactura && <small className="invoice-id-mini">ID: {form.idFactura}</small>}
                   </div>
                   <input
@@ -1099,7 +1094,7 @@ export default function App() {
               <div className="form-grid">
                 <div className="field-group ref-period-group">
                   <label>
-                    <ClipboardList size={14} /> Ref. (Nº) — Buscar por periodo
+                    <ClipboardList size={14} /> Periodo de la factura (mes y año)
                   </label>
 
                   {/* Selector de mes / año */}
@@ -1148,15 +1143,12 @@ export default function App() {
                         setSelectedRefFileName(found ? found.fullName : "");
                       }}
                     >
-                      <option value="">— Seleccionar referencia o archivo —</option>
-                      {nextRef !== "..." && (
-                        <option value={nextRef}>⭐ Nueva: {nextRef} (siguiente disponible)</option>
-                      )}
+                      <option value="">— Seleccionar factura ya subida —</option>
                       {refsPropiedad.length > 0 && (
                         <optgroup label={`── ${form.propiedad || "Todas"} · ${selectedMonth} ${selectedYear} en Drive (${refsPropiedad.length}) ──`}>
                           {refsPropiedad.map(item => (
                             <option key={item.fileId || item.ref} value={item.fileId || item.ref}>
-                              {item.fullName} {item.ref && item.ref !== "---" ? `(Ref ${item.ref})` : ""}
+                              {item.fullName}
                             </option>
                           ))}
                         </optgroup>
@@ -1167,6 +1159,7 @@ export default function App() {
                     </select>
                     <ChevronDown size={18} className="select-arrow" />
                   </div>
+                  {refsError && <div className="upload-status-mini error" role="alert">{refsError}</div>}
                   {selectedRefFileName && (
                     <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>
                       📄 Archivo: <strong>{selectedRefFileName}</strong>
@@ -1638,7 +1631,7 @@ export default function App() {
             <div className="help-section">
               <h3><CheckCircle size={16} /> Resumen rápido (el orden importa)</h3>
               <ol>
-                <li>Elige el <strong>mes y año</strong> de la factura en "Ref. (Nº) — Buscar por periodo".</li>
+                <li>Elige el <strong>mes y año</strong> de la factura en "Periodo de la factura (mes y año)".</li>
                 <li>Elige la <strong>Propiedad</strong> (campo con buscador, más abajo en el formulario).</li>
                 <li>Escribe el <strong>Nombre de la factura</strong> (arriba, en "Carga de Factura").</li>
                 <li>Sube el archivo en "Haz clic o arrastra la factura". Espera al mensaje verde ✅.</li>
@@ -1666,9 +1659,8 @@ export default function App() {
               <ol>
                 <li><strong>Mes y año:</strong> son los del periodo al que pertenece la factura; deciden en qué carpeta de Drive se guarda. Cámbialos <strong>antes</strong> de subir.</li>
                 <li><strong>Elige los archivos:</strong> puedes seleccionar varios a la vez (por ejemplo, las 5 facturas de una propiedad). Aparece una lista con un nombre por factura, relleno con el del archivo.</li>
-                <li><strong>Nombre de cada factura:</strong> cámbialo por uno claro que luego sepas buscar, p. ej. "Tapa WC Vistamar IV" o "Mando garaje Acapulco". Ese nombre es el que tendrá el archivo en Drive y el que verás en el desplegable de referencias. Evita nombres genéricos como "prueba" o "factura". Con el ojo ves el archivo y con la papelera lo quitas de la lista.</li>
-                <li>Pulsa <strong>"Subir N facturas"</strong>. Cada archivo se guarda en Drive así: <code>Nombre FAC-XXXX-XXXX 019.pdf</code> — tu nombre, un código único (ID) y la referencia (REF) del mes. No hace falta renombrar nada.</li>
-                <li><strong>REF:</strong> se asigna sola, una seguida de otra (019, 020, 021...). Es un número correlativo por mes, compartido entre todas las propiedades.</li>
+                <li><strong>Nombre de cada factura:</strong> cámbialo por uno claro que luego sepas buscar, p. ej. "Tapa WC Vistamar IV" o "Mando garaje Acapulco". Ese nombre es el que tendrá el archivo en Drive y el que verás en el desplegable de facturas ya subidas. Evita nombres genéricos como "prueba" o "factura". Con el ojo ves el archivo y con la papelera lo quitas de la lista.</li>
+                <li>Pulsa <strong>"Subir N facturas"</strong>. Cada archivo se guarda en Drive así: <code>Nombre FAC-XXXX-XXXX 019.pdf</code> — tu nombre, un código único (ID) y un número que pone Drive solo. No hace falta renombrar nada. La factura se busca siempre por su <strong>nombre</strong> y su <strong>ID</strong>.</li>
                 <li>Formatos: PDF o imagen (JPG, PNG). Mientras sube verás una barra con lo que está haciendo; no cierres la página hasta ver el mensaje verde "✅". Si alguna falla, se queda en la lista para volver a intentarlo.</li>
                 <li><strong>Varias facturas en una incidencia:</strong> todas quedan en la misma fila. En "Ver factura" eliges cuál ver en el selector "Factura". Al editar una incidencia puedes añadirle más.</li>
               </ol>
@@ -1677,9 +1669,8 @@ export default function App() {
             <div className="help-section">
               <h3><ClipboardList size={16} /> Usar una factura que ya está en Drive</h3>
               <ol>
-                <li>Si la factura ya se subió (por ejemplo, desde otra incidencia), no la subas de nuevo: elige mes/año y propiedad, y ábrela en el desplegable <strong>"— Seleccionar referencia o archivo —"</strong>.</li>
+                <li>Si la factura ya se subió (por ejemplo, desde otra incidencia), no la subas de nuevo: elige mes/año y propiedad, y ábrela en el desplegable <strong>"— Seleccionar factura ya subida —"</strong>.</li>
                 <li>El desplegable solo enseña las facturas de la <strong>propiedad elegida</strong> en ese mes. Si no eliges propiedad, enseña las de todas.</li>
-                <li>"⭐ Nueva: 019 (siguiente disponible)" es la próxima referencia libre; úsala solo si vas a subir una factura nueva.</li>
                 <li>Debajo aparece "📄 Archivo: …" con el nombre del archivo elegido, para que confirmes que es el correcto.</li>
               </ol>
             </div>
@@ -1689,7 +1680,7 @@ export default function App() {
               <ol>
                 <li>Busca por nombre de alojamiento en "Buscar por alojamiento...".</li>
                 <li>Filtra por mes con el desplegable de al lado. El filtro usa la <strong>fecha de la incidencia</strong>, no el mes en que se subió la factura: una incidencia de junio con factura de septiembre sale en junio.</li>
-                <li><Eye size={14} /> <strong>Ver factura</strong> abre la vista previa. Solo aparece si la incidencia tiene REF o ID de factura. Si no la encuentra en el mes de la incidencia, la busca sola en el resto de meses del año (por eso el selector "Mes" de la vista previa puede cambiar solo).</li>
+                <li><Eye size={14} /> <strong>Ver factura</strong> abre la vista previa. Solo aparece si la incidencia tiene ID de factura (o REF, en las facturas viejas). Si no la encuentra en el mes de la incidencia, la busca sola en el resto de meses del año (por eso el selector "Mes" de la vista previa puede cambiar solo).</li>
                 <li><Pencil size={14} /> <strong>Editar</strong> abre la incidencia en el formulario; cambia lo necesario y pulsa "Guardar Cambios".</li>
                 <li><Trash2 size={14} /> <strong>Borrar</strong> pide confirmación y elimina la fila del historial. <strong>No borra la factura de Drive</strong>; si también sobra, bórrala a mano en Drive.</li>
                 <li>El historial se reutiliza durante un minuto. "Actualizar historial" vuelve a consultarlo; si falla, pulsa "Reintentar". Lo que se cambia desde la app se ve al momento; lo que se cambia <strong>a mano en la hoja de cálculo</strong> puede tardar hasta 5 minutos en verse.</li>
@@ -1722,7 +1713,7 @@ export default function App() {
             <div className="help-section">
               <h3><HelpCircle size={16} /> Problemas frecuentes</h3>
               <ol>
-                <li><strong>"Esperando la referencia de Drive..."</strong> — la app aún está pidiendo el número de REF. Espera unos segundos. Si no cambia, recarga la página.</li>
+                <li><strong>"No se pudieron leer las facturas de … en Drive"</strong> — Apps Script no contestó en 1 minuto. Puedes subir igualmente; el desplegable de facturas ya subidas y el aviso de nombre repetido no funcionarán hasta que recargues la página.</li>
                 <li><strong>"Primero elige la propiedad."</strong> — baja al campo Propiedad del formulario y elige una; después vuelve a la zona de la factura.</li>
                 <li><strong>"Escribe el nombre de la factura antes de subirla."</strong> — rellena "Nombre de la factura".</li>
                 <li><strong>"Ya existe una factura "…" para … en …"</strong> — esa propiedad ya tiene en ese mes una factura con el mismo nombre. Si es la misma, no la subas: elígela en el desplegable de referencias. Si es otra distinta, cámbiale el nombre (p. ej. añade "2").</li>
