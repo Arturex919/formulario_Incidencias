@@ -117,6 +117,8 @@ const refDeIncidencia = (inc) => {
   return String(raw).trim() === "" ? "" : String(raw).trim().padStart(3, '0');
 };
 
+const SEPARADOR_FACTURAS = " | ";
+
 // Identificador único de cada factura: se genera aquí porque el POST va en no-cors
 // y no se puede leer la respuesta del Apps Script.
 const nuevoIdFactura = () =>
@@ -125,6 +127,14 @@ const nuevoIdFactura = () =>
 // ─── Vista previa de la factura ya guardada en Drive ──────────────────────────
 // Busca inteligentemente en el mes correspondiente o en cualquier otro mes del año
 function FacturaPreview({ refNum, fecha, idFactura, nombreFactura, propiedad, mes: mesPeriodo, anio: anioPeriodo }) {
+  // Una incidencia puede tener varias facturas: nombres, IDs y REFs van en la hoja separados por SEPARADOR_FACTURAS, en el mismo orden.
+  const ids = String(idFactura || "").split(SEPARADOR_FACTURAS);
+  const nombres = String(nombreFactura || "").split(SEPARADOR_FACTURAS);
+  const refs = String(refNum || "").split(SEPARADOR_FACTURAS);
+  const totalFacturas = Math.max(ids.length, nombres.length, refs.length);
+  const [idx, setIdx] = useState(0);
+  const id = ids[idx] || "", nombre = nombres[idx] || "", ref = refs[idx] || "";
+
   const d = new Date(fecha);
   const valida = !isNaN(d.getTime());
   const defaultMes = mesPeriodo || MONTHS[valida ? d.getMonth() : new Date().getMonth()];
@@ -144,9 +154,9 @@ function FacturaPreview({ refNum, fecha, idFactura, nombreFactura, propiedad, me
       try {
         const params = new URLSearchParams({
           action: "findInvoice",
-          id: idFactura || "",
-          name: nombreFactura || "",
-          ref: refNum || "",
+          id,
+          name: nombre,
+          ref,
           month: currentMonth || "",
           year: currentYear || "",
           propiedad: propiedad || ""
@@ -177,12 +187,34 @@ function FacturaPreview({ refNum, fecha, idFactura, nombreFactura, propiedad, me
 
     buscar();
     return () => { cancelado = true; };
-  }, [refNum, currentMonth, currentYear, idFactura, nombreFactura, propiedad]);
+  }, [ref, currentMonth, currentYear, id, nombre, propiedad]);
 
   return (
     <div className="preview-container animate-fade-in">
       <div className="preview-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.6rem', padding: '0.5rem 0.8rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+          {totalFacturas > 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>Factura:</span>
+              <select
+                value={idx}
+                onChange={(e) => setIdx(Number(e.target.value))}
+                style={{
+                  background: 'rgba(255,255,255,0.08)',
+                  color: 'inherit',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  borderRadius: '6px',
+                  padding: '3px 6px',
+                  fontSize: '0.78rem',
+                  maxWidth: '220px'
+                }}
+              >
+                {Array.from({ length: totalFacturas }, (_, i) => (
+                  <option key={i} value={i} style={{ color: '#000' }}>{nombres[i] || ids[i] || `Factura ${i + 1}`}</option>
+                ))}
+              </select>
+            </div>
+          )}
           {/* Selector de periodo (Mes y Año) */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
             <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>Mes:</span>
@@ -299,6 +331,8 @@ export default function App() {
   const [loadingRefs, setLoadingRefs] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState(null);
+  const [pendingFiles, setPendingFiles] = useState([]); // [{ file, nombre }] elegidos y aún sin subir
+  const [uploadProgress, setUploadProgress] = useState(null); // { pct, msg }
   const [previewUrl, setPreviewUrl] = useState(null);
   const [previewType, setPreviewType] = useState(null);
   // Nombre del archivo seleccionado para el campo REF
@@ -628,6 +662,7 @@ export default function App() {
     };
 
     setForm(dataToEdit);
+    setPendingFiles([]);
     setIsEditing(true);
     setActiveTab("nuevo");
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -635,6 +670,7 @@ export default function App() {
 
   const resetForm = () => {
     setForm(FORM_INICIAL);
+    setPendingFiles([]);
     setIsEditing(false);
     setStatus({ type: "", msg: "" });
     setPreviewUrl(null);
@@ -646,97 +682,134 @@ export default function App() {
     setForm((prev) => ({ ...prev, [name]: value }));
   };
 
-  // Orden obligatorio: propiedad → nombre → archivo. Evita facturas duplicadas (mismo nombre, propiedad y mes, o segunda subida en la misma incidencia).
-  const nombreFacturaSubida = form.nombreFactura.trim();
+  // Orden obligatorio: propiedad → archivos (un nombre por archivo) → subir. Evita facturas duplicadas (mismo nombre, propiedad y mes).
   // Las refs se numeran por mes para todas las propiedades, pero el selector solo enseña las de la propiedad elegida.
   const refsPropiedad = form.propiedad
     ? existingRefs.filter(r => String(r.propiedad || "").trim().toUpperCase() === String(form.propiedad).trim().toUpperCase())
     : existingRefs;
-  const facturaRepetida = nombreFacturaSubida && form.propiedad && refsPropiedad.some(r =>
-    String(r.clientName || "").split(/ FAC-/i)[0].trim().toUpperCase() === nombreFacturaSubida.toUpperCase()
-  );
   const bloqueoSubida =
     !/^\d+$/.test(String(nextRef)) ? "Esperando la referencia de Drive..." :
     !form.propiedad       ? "Primero elige la propiedad." :
-    !nombreFacturaSubida  ? "Escribe el nombre de la factura antes de subirla." :
-    facturaRepetida       ? `Ya existe una factura "${nombreFacturaSubida}" para ${form.propiedad} en ${selectedMonth}. Cambia el nombre si es otra distinta.` :
-    form.idFactura        ? "Esta incidencia ya tiene una factura subida." :
+    "";
+  const nombresPendientes = pendingFiles.map(p => p.nombre.trim().toUpperCase());
+  const repetidaEnDrive = pendingFiles.find(p => refsPropiedad.some(r =>
+    String(r.clientName || "").split(/ FAC-/i)[0].trim().toUpperCase() === p.nombre.trim().toUpperCase()
+  ));
+  const bloqueoPendientes =
+    nombresPendientes.some(n => !n) ? "Ponle nombre a todas las facturas." :
+    repetidaEnDrive ? `Ya existe una factura "${repetidaEnDrive.nombre.trim()}" para ${form.propiedad} en ${selectedMonth}. Cambia el nombre si es otra distinta.` :
+    new Set(nombresPendientes).size < nombresPendientes.length ? "Hay dos facturas con el mismo nombre." :
     "";
 
-  const handleFileUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
+  const handleFileSelect = (e) => {
+    const files = Array.from(e.target.files);
+    e.target.value = "";
+    if (!files.length) return;
     if (bloqueoSubida) {
       setUploadStatus({ type: 'error', msg: bloqueoSubida });
-      e.target.value = "";
+      return;
+    }
+    // El nombre sugerido es el del archivo sin extensión; se puede cambiar antes de subir.
+    setPendingFiles(prev => [...prev, ...files.map(file => ({ file, nombre: file.name.replace(/\.[^.]+$/, '') }))]);
+    setUploadStatus(null);
+  };
+
+  const verPendiente = (file) => {
+    setPreviewUrl(URL.createObjectURL(file));
+    setPreviewType(file.type);
+  };
+
+  const leerBase64 = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+
+  const handleUploadAll = async () => {
+    const bloqueo = bloqueoSubida || bloqueoPendientes;
+    if (bloqueo) {
+      setUploadStatus({ type: 'error', msg: bloqueo });
       return;
     }
 
-    const idFactura = nuevoIdFactura();
-
-    // Crear URL temporal para la vista previa
-    const fileUrl = URL.createObjectURL(file);
-    setPreviewUrl(fileUrl);
-    setPreviewType(file.type);
+    const total = pendingFiles.length;
+    const pasos = total + 1; // una subida por archivo + la comprobación final en Drive
+    const primeraRef = parseInt(nextRef, 10);
+    const enviadas = [];
+    let errorRed = "";
 
     setIsUploading(true);
-    setUploadStatus({ type: 'info', msg: 'Subiendo factura y generando referencia...' });
+    setUploadStatus(null);
 
-    try {
-      const currentNextRef = String(nextRef); // SIEMPRE STRING
-      const ext = file.name.includes('.') ? file.name.split('.').pop() : 'pdf';
-      const finalFileName = `${nombreFacturaSubida} ${idFactura} ${currentNextRef}.${ext}`;
-
-      const reader = new FileReader();
-
-      reader.onload = async (event) => {
-        try {
-          const base64 = event.target.result;
-          const payload = {
-            action: "uploadInvoice",
-            fileBase64: base64,
-            fileName: file.name,
-            invoiceId: idFactura,
-            invoiceName: nombreFacturaSubida,
-            refNumber: String(currentNextRef), // FORZAR STRING para evitar float
-            month: selectedMonth,
-            year: selectedYear,
-            propiedad: form.propiedad
-          };
-
-          // POST a Apps Script con no-cors para evitar el bloqueo del navegador
-          await fetch(GOOGLE_SCRIPT_URL, {
-            method: "POST",
-            mode: "no-cors",
-            body: JSON.stringify(payload)
-          });
-
-          // no-cors no deja leer la respuesta: se comprueba en Drive que la factura está
-          const refs = await fetchNextRef(selectedMonth, selectedYear);
-          const enDrive = refs.some(r => r.ref === String(currentNextRef).padStart(3, '0'));
-
-          if (!enDrive) {
-            setUploadStatus({ type: 'error', msg: `⚠️ Drive no confirma la factura ${currentNextRef} en ${selectedMonth} ${selectedYear}. No se ha guardado: revisa que exista la carpeta del trimestre.` });
-            return;
-          }
-
-          setForm(prev => ({ ...prev, ref: currentNextRef, idFactura }));
-          setSelectedRefFileName(finalFileName);
-          setUploadStatus({ type: 'success', msg: `✅ Factura subida: "${finalFileName}"` });
-          setShowSuccess(true);
-          setTimeout(() => setShowSuccess(false), 3000);
-        } catch (postError) {
-          setUploadStatus({ type: 'error', msg: 'Error de red al subir la factura.' });
-        } finally {
-          setIsUploading(false);
-        }
-      };
-      reader.readAsDataURL(file);
-    } catch (error) {
-      setUploadStatus({ type: 'error', msg: 'Error al procesar: ' + error.message });
-      setIsUploading(false);
+    // Una detrás de otra: cada una se lleva la REF siguiente y Apps Script no recibe subidas simultáneas.
+    for (let i = 0; i < total; i++) {
+      const { file, nombre } = pendingFiles[i];
+      const nombreLimpio = nombre.trim();
+      setUploadProgress({ pct: Math.round(i / pasos * 100), msg: `Subiendo ${i + 1} de ${total}: "${nombreLimpio}"...` });
+      try {
+        const ext = file.name.includes('.') ? file.name.split('.').pop() : 'pdf';
+        const ref = String(primeraRef + i).padStart(3, '0'); // SIEMPRE STRING
+        const idFactura = nuevoIdFactura();
+        const payload = {
+          action: "uploadInvoice",
+          fileBase64: await leerBase64(file),
+          fileName: file.name,
+          invoiceId: idFactura,
+          invoiceName: nombreLimpio,
+          refNumber: ref,
+          month: selectedMonth,
+          year: selectedYear,
+          propiedad: form.propiedad
+        };
+        // POST a Apps Script con no-cors para evitar el bloqueo del navegador
+        await fetch(GOOGLE_SCRIPT_URL, {
+          method: "POST",
+          mode: "no-cors",
+          body: JSON.stringify(payload)
+        });
+        enviadas.push({ pendiente: pendingFiles[i], nombre: nombreLimpio, idFactura, ref, fileName: `${nombreLimpio} ${idFactura} ${ref}.${ext}` });
+      } catch {
+        errorRed =`Error de red al subir "${nombreLimpio}".`;
+        break;
+      }
     }
+
+    // no-cors no deja leer la respuesta: se comprueba en Drive, por el ID, qué facturas están
+    setUploadProgress({ pct: Math.round(total / pasos * 100), msg: "Comprobando en Drive que se han guardado..." });
+    const refs = enviadas.length ? await fetchNextRef(selectedMonth, selectedYear) : [];
+    const confirmadas = enviadas.filter(s => refs.some(r => String(r.fullName || "").includes(s.idFactura)));
+
+    if (confirmadas.length) {
+      const unir = (actual, nuevos) => [...new Set([...String(actual || "").split(SEPARADOR_FACTURAS), ...nuevos].filter(Boolean))].join(SEPARADOR_FACTURAS);
+      setForm(prev => ({
+        ...prev,
+        ref: unir(prev.ref, confirmadas.map(s => s.ref)),
+        idFactura: unir(prev.idFactura, confirmadas.map(s => s.idFactura)),
+        nombreFactura: unir(prev.nombreFactura, confirmadas.map(s => s.nombre)),
+      }));
+      setSelectedRefFileName(confirmadas.map(s => s.fileName).join(", "));
+    }
+    // Las que no se confirmaron se quedan en la lista para reintentarlas
+    setPendingFiles(prev => prev.filter(p => !confirmadas.some(s => s.pendiente === p)));
+
+    const noConfirmadas = enviadas.filter(s => !confirmadas.includes(s)).map(s => `"${s.nombre}"`);
+    if (errorRed || noConfirmadas.length) {
+      setUploadStatus({
+        type: 'error',
+        msg: [
+          confirmadas.length ? `✅ ${confirmadas.length} de ${total} subidas.` : "",
+          noConfirmadas.length ? `⚠️ Drive no confirma ${noConfirmadas.join(", ")} en ${selectedMonth} ${selectedYear}: revisa que exista la carpeta del trimestre.` : "",
+          errorRed
+        ].filter(Boolean).join(" ")
+      });
+    } else {
+      setUploadStatus({ type: 'success', msg: `✅ ${total === 1 ? "Factura subida" : `${total} facturas subidas`}: ${confirmadas.map(s => `"${s.fileName}"`).join(", ")}` });
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 3000);
+    }
+    setUploadProgress(null);
+    setIsUploading(false);
   };
 
   const clasificacionFinal =
@@ -902,31 +975,70 @@ export default function App() {
                 <span>Carga de Factura (Auto-Ref)</span>
               </div>
               <div className="upload-content">
-                <div className="field-group">
-                  <label htmlFor="nombreFactura">
-                    <FileText size={14} /> Nombre de la factura
-                  </label>
-                  <input id="nombreFactura" name="nombreFactura" type="text"
-                    value={form.nombreFactura} onChange={handleChange}
-                    placeholder="Ej. Fontanería baño principal" />
-                </div>
+                {/* Nombres ya guardados en la hoja: se pueden corregir aquí (no renombra el archivo en Drive) */}
+                {(form.nombreFactura || form.idFactura) && (
+                  <div className="field-group">
+                    <label htmlFor="nombreFactura">
+                      <FileText size={14} /> Facturas de esta incidencia
+                    </label>
+                    <input id="nombreFactura" name="nombreFactura" type="text"
+                      value={form.nombreFactura} onChange={handleChange} />
+                  </div>
+                )}
                 <label htmlFor="invoice-upload" className={`upload-label ${isUploading ? 'uploading' : ''}`}
                   style={bloqueoSubida && !isUploading ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}>
-                  {isUploading ? <Loader2 size={24} className="spin" /> : <PlusCircle size={24} />}
+                  <PlusCircle size={24} />
                   <div className="upload-text">
-                    <p>{isUploading ? "Procesando..." : bloqueoSubida || "Haz clic o arrastra la factura"}</p>
-                    <small>Se asignará la referencia {nextRef} automáticamente</small>
+                    <p>{isUploading ? "Subiendo facturas..." : bloqueoSubida || "Haz clic para elegir facturas (puedes elegir varias)"}</p>
+                    <small>Se asignarán las referencias desde la {nextRef} automáticamente</small>
                     {form.idFactura && <small className="invoice-id-mini">ID: {form.idFactura}</small>}
                   </div>
                   <input
                     id="invoice-upload"
                     type="file"
                     accept=".pdf,image/*"
-                    onChange={handleFileUpload}
+                    multiple
+                    onChange={handleFileSelect}
                     disabled={isUploading || !!bloqueoSubida}
                     style={{ display: 'none' }}
                   />
                 </label>
+                {pendingFiles.length > 0 && (
+                  <div className="pending-files">
+                    {pendingFiles.map((p, i) => (
+                      <div key={i} className="pending-file">
+                        <div className="pending-file-name">
+                          <input type="text" value={p.nombre} disabled={isUploading}
+                            aria-label={`Nombre de la factura ${p.file.name}`}
+                            placeholder="Ej. Fontanería baño principal"
+                            onChange={e => setPendingFiles(prev => prev.map((x, j) => j === i ? { ...x, nombre: e.target.value } : x))} />
+                          <small>{p.file.name}</small>
+                        </div>
+                        <button type="button" className="btn btn-secondary btn-icon-only" title="Ver"
+                          onClick={() => verPendiente(p.file)}>
+                          <Eye size={16} />
+                        </button>
+                        <button type="button" className="btn btn-danger btn-icon-only" title="Quitar" disabled={isUploading}
+                          onClick={() => setPendingFiles(prev => prev.filter((_, j) => j !== i))}>
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    ))}
+                    {bloqueoPendientes && <div className="upload-status-mini error">{bloqueoPendientes}</div>}
+                    <button type="button" className="btn btn-primary" onClick={handleUploadAll}
+                      disabled={isUploading || !!bloqueoSubida || !!bloqueoPendientes}>
+                      <Send size={18} /> Subir {pendingFiles.length === 1 ? "1 factura" : `${pendingFiles.length} facturas`}
+                    </button>
+                  </div>
+                )}
+                {uploadProgress && (
+                  <div className="upload-progress" role="progressbar" aria-valuenow={uploadProgress.pct} aria-valuemin={0} aria-valuemax={100}>
+                    <div className="upload-progress-track">
+                      <div className="upload-progress-fill" style={{ width: `${uploadProgress.pct}%` }} />
+                    </div>
+                    <small>{uploadProgress.msg}</small>
+                  </div>
+                )}
                 {uploadStatus && (
                   <div className={`upload-status-mini ${uploadStatus.type}`}>
                     {uploadStatus.msg}
@@ -1553,11 +1665,12 @@ export default function App() {
               <h3><Truck size={16} /> Subir una factura</h3>
               <ol>
                 <li><strong>Mes y año:</strong> son los del periodo al que pertenece la factura; deciden en qué carpeta de Drive se guarda. Cámbialos <strong>antes</strong> de subir.</li>
-                <li><strong>Nombre de la factura:</strong> ponle un nombre claro que luego sepas buscar, p. ej. "Tapa WC Vistamar IV" o "Mando garaje Acapulco". Ese nombre es el que tendrá el archivo en Drive y el que verás en el desplegable de referencias. Evita nombres genéricos como "prueba" o "factura".</li>
-                <li>El archivo se guarda en Drive así: <code>Nombre FAC-XXXX-XXXX 019.pdf</code> — tu nombre, un código único (ID) y la referencia (REF) del mes. No hace falta renombrar nada.</li>
-                <li><strong>REF:</strong> se asigna sola ("Se asignará la referencia 019 automáticamente"). Es un número correlativo por mes, compartido entre todas las propiedades.</li>
-                <li>Formatos: PDF o imagen (JPG, PNG). Mientras sube verás "Procesando..."; no cierres la página hasta ver el mensaje verde "✅ Factura subida".</li>
-                <li><strong>Una factura por incidencia.</strong> Si necesitas otra, crea otra incidencia.</li>
+                <li><strong>Elige los archivos:</strong> puedes seleccionar varios a la vez (por ejemplo, las 5 facturas de una propiedad). Aparece una lista con un nombre por factura, relleno con el del archivo.</li>
+                <li><strong>Nombre de cada factura:</strong> cámbialo por uno claro que luego sepas buscar, p. ej. "Tapa WC Vistamar IV" o "Mando garaje Acapulco". Ese nombre es el que tendrá el archivo en Drive y el que verás en el desplegable de referencias. Evita nombres genéricos como "prueba" o "factura". Con el ojo ves el archivo y con la papelera lo quitas de la lista.</li>
+                <li>Pulsa <strong>"Subir N facturas"</strong>. Cada archivo se guarda en Drive así: <code>Nombre FAC-XXXX-XXXX 019.pdf</code> — tu nombre, un código único (ID) y la referencia (REF) del mes. No hace falta renombrar nada.</li>
+                <li><strong>REF:</strong> se asigna sola, una seguida de otra (019, 020, 021...). Es un número correlativo por mes, compartido entre todas las propiedades.</li>
+                <li>Formatos: PDF o imagen (JPG, PNG). Mientras sube verás una barra con lo que está haciendo; no cierres la página hasta ver el mensaje verde "✅". Si alguna falla, se queda en la lista para volver a intentarlo.</li>
+                <li><strong>Varias facturas en una incidencia:</strong> todas quedan en la misma fila. En "Ver factura" eliges cuál ver en el selector "Factura". Al editar una incidencia puedes añadirle más.</li>
               </ol>
             </div>
 
