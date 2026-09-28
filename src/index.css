@@ -1054,6 +1054,11 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   min-width: 160px;
 }
 
+.date-range { display: flex; align-items: flex-end; gap: 0.5rem; flex-wrap: wrap; }
+.date-range label { display: flex; flex-direction: column; gap: 0.2rem; }
+.date-range label span { font-size: 0.72rem; font-weight: 600; color: var(--text-muted); }
+.date-range input[type="date"] { width: auto; padding: 0.55rem 0.8rem; }
+
 .search-box {
   position: relative;
   display: flex;
