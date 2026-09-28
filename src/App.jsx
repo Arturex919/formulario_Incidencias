@@ -549,7 +549,7 @@ export default function App() {
     setLoadingAdminProps(true);
     setAdminPropsError(null);
     try {
-      const data = await requestAdmin('getProperties');
+      const data = await requestAdmin('getProperties', force ? { force: "1" } : {});
       if (!['all', 'lodgify', 'manual'].every(k => Array.isArray(data[k]) && data[k].every(n => typeof n === 'string'))) {
         throw new Error('La lista de propiedades está incompleta. Vuelve a intentarlo.');
       }
