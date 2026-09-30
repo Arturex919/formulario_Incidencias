@@ -24,6 +24,36 @@ const MONTHS = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", 
 
 const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwhQ4teH9bNt6HVNgYrKi_sfZ9HvujWQppcLaLIp80P2LbcpHPiNPcu6mWFU6eIUXcW/exec";
 
+// Google a ratos tarda 10-60 s en ejecutar (incluso lo cacheado) o acaba en 404 en script.googleusercontent.com/macros/echo,
+// mientras que otra petición igual lanzada a la vez vuelve en 1-2 s. Por eso, si no hay respuesta en 5 s o falla,
+// se lanza otra (hasta 4) y gana la primera buena. Solo para lecturas de facturas: repetirlas no cambia nada.
+async function getScriptJson(query) {
+  const ctrl = new AbortController();
+  const limite = setTimeout(() => ctrl.abort(), 60000);
+  try {
+    return await new Promise((resolve, reject) => {
+      let lanzadas = 0, fallidas = 0, espera;
+      const lanzar = () => {
+        clearTimeout(espera);
+        if (lanzadas === 4 || ctrl.signal.aborted) return;
+        const intento = ++lanzadas;
+        fetch(`${GOOGLE_SCRIPT_URL}?${query}`, { signal: ctrl.signal })
+          .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
+          .then(resolve, error => {
+            if (++fallidas === 4 || ctrl.signal.aborted) return reject(error);
+            console.warn(`Apps Script falló (intento ${intento}), se lanza otro:`, error);
+            lanzar();
+          });
+        espera = setTimeout(lanzar, 5000);
+      };
+      lanzar();
+    });
+  } finally {
+    clearTimeout(limite);
+    ctrl.abort(); // corta las que sigan en vuelo
+  }
+}
+
 // Las acciones administrativas necesitan una respuesta legible antes de confirmar éxito.
 async function requestAdmin(action, params = {}, write = false, signal) {
   const controller = new AbortController();
@@ -188,8 +218,7 @@ function FacturaPreview({ refNum, fecha, idFactura, nombreFactura, propiedad, me
           year: currentYear || "",
           propiedad: propiedad || ""
         });
-        const res = await fetch(`${GOOGLE_SCRIPT_URL}?${params.toString()}`);
-        const data = await res.json();
+        const data = await getScriptJson(params.toString());
         if (!cancelado) {
           if (data.found && data.file) {
             setFile(data.file);
@@ -493,28 +522,18 @@ export default function App() {
     setLoadingRefs(true);
     setRefsError("");
     try {
-      // Google a veces responde 404 ("No se puede abrir el archivo") y a la siguiente va bien: se reintenta.
-      for (let intento = 1; ; intento++) {
-        try {
-          const params = month && year ? `&month=${month}&year=${year}&_t=${Date.now()}` : `&_t=${Date.now()}`;
-          // Con tiempo máximo: si Apps Script no contesta, se avisa en vez de quedarse cargando para siempre.
-          const resAll = await fetch(`${GOOGLE_SCRIPT_URL}?action=getAllRefs${params}`, { signal: AbortSignal.timeout(60000) });
-          if (!resAll.ok) throw new Error(`HTTP ${resAll.status}`);
-          const dataAll = await resAll.json();
-          if (Array.isArray(dataAll.refs)) {
-            // Forzar ref como string en cada item
-            const refs = dataAll.refs.map(item => ({ ...item, ref: String(item.ref) }));
-            setExistingRefs(refs);
-            return refs;
-          }
-          setExistingRefs([]);
-          return [];
-        } catch (error) {
-          console.error(`Error al obtener las facturas del mes (intento ${intento}):`, error);
-          if (intento === 3) throw error;
-        }
+      const params = month && year ? `&month=${month}&year=${year}&_t=${Date.now()}` : `&_t=${Date.now()}`;
+      const dataAll = await getScriptJson(`action=getAllRefs${params}`);
+      if (Array.isArray(dataAll.refs)) {
+        // Forzar ref como string en cada item
+        const refs = dataAll.refs.map(item => ({ ...item, ref: String(item.ref) }));
+        setExistingRefs(refs);
+        return refs;
       }
-    } catch {
+      setExistingRefs([]);
+      return [];
+    } catch (error) {
+      console.error("Error al obtener las facturas del mes:", error);
       setRefsError(`No se pudieron leer las facturas de ${month} ${year} en Drive. Puedes subir igualmente; si persiste, recarga la página.`);
       setExistingRefs([]);
       return null;
