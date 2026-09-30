@@ -493,23 +493,31 @@ export default function App() {
     setLoadingRefs(true);
     setRefsError("");
     try {
-      const params = month && year ? `&month=${month}&year=${year}&_t=${Date.now()}` : `&_t=${Date.now()}`;
-      // Con tiempo máximo: si Apps Script no contesta, se avisa en vez de quedarse cargando para siempre.
-      const resAll = await fetch(`${GOOGLE_SCRIPT_URL}?action=getAllRefs${params}`, { signal: AbortSignal.timeout(60000) });
-      const dataAll = await resAll.json();
-      if (Array.isArray(dataAll.refs)) {
-        // Forzar ref como string en cada item
-        const refs = dataAll.refs.map(item => ({ ...item, ref: String(item.ref) }));
-        setExistingRefs(refs);
-        return refs;
+      // Google a veces responde 404 ("No se puede abrir el archivo") y a la siguiente va bien: se reintenta.
+      for (let intento = 1; ; intento++) {
+        try {
+          const params = month && year ? `&month=${month}&year=${year}&_t=${Date.now()}` : `&_t=${Date.now()}`;
+          // Con tiempo máximo: si Apps Script no contesta, se avisa en vez de quedarse cargando para siempre.
+          const resAll = await fetch(`${GOOGLE_SCRIPT_URL}?action=getAllRefs${params}`, { signal: AbortSignal.timeout(60000) });
+          if (!resAll.ok) throw new Error(`HTTP ${resAll.status}`);
+          const dataAll = await resAll.json();
+          if (Array.isArray(dataAll.refs)) {
+            // Forzar ref como string en cada item
+            const refs = dataAll.refs.map(item => ({ ...item, ref: String(item.ref) }));
+            setExistingRefs(refs);
+            return refs;
+          }
+          setExistingRefs([]);
+          return [];
+        } catch (error) {
+          console.error(`Error al obtener las facturas del mes (intento ${intento}):`, error);
+          if (intento === 3) throw error;
+        }
       }
-      setExistingRefs([]);
-      return [];
-    } catch (error) {
-      console.error("Error al obtener las facturas del mes:", error);
+    } catch {
       setRefsError(`No se pudieron leer las facturas de ${month} ${year} en Drive. Puedes subir igualmente; si persiste, recarga la página.`);
       setExistingRefs([]);
-      return [];
+      return null;
     } finally {
       setLoadingRefs(false);
     }
@@ -797,7 +805,8 @@ export default function App() {
 
     // no-cors no deja leer la respuesta: se comprueba en Drive, por el ID, qué facturas están
     setUploadProgress({ pct: Math.round(total / pasos * 100), msg: "Comprobando en Drive que se han guardado..." });
-    const refs = enviadas.length ? await fetchFacturasMes(selectedMonth, selectedYear) : [];
+    const leidas = enviadas.length ? await fetchFacturasMes(selectedMonth, selectedYear) : [];
+    const refs = leidas || [];
     // La REF la pone Apps Script en el nombre del archivo; se copia a la hoja solo como dato, no se usa para buscar.
     const confirmadas = enviadas
       .map(s => ({ ...s, drive: refs.find(r => String(r.fullName || "").includes(s.idFactura)) }))
@@ -823,7 +832,9 @@ export default function App() {
         type: 'error',
         msg: [
           confirmadas.length ? `✅ ${confirmadas.length} de ${total} subidas.` : "",
-          noConfirmadas.length ? `⚠️ Drive no confirma ${noConfirmadas.join(", ")} en ${selectedMonth} ${selectedYear}: revisa que exista la carpeta del trimestre.` : "",
+          noConfirmadas.length ? (leidas
+            ? `⚠️ Drive no confirma ${noConfirmadas.join(", ")} en ${selectedMonth} ${selectedYear}: revisa que exista la carpeta del trimestre.`
+            : `⚠️ No se pudo comprobar en Drive ${noConfirmadas.join(", ")}: seguramente sí se subió. NO la vuelvas a subir: quítala de la lista con la papelera y comprueba en Drive.`) : "",
           errorRed
         ].filter(Boolean).join(" ")
       });
